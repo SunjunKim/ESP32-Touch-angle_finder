@@ -1,7 +1,14 @@
+#include <stdint.h>
+
+// Forward declaration to survive Arduino auto-prototypes.
+enum class AppMode : uint8_t;
+
 #include <Arduino.h>
 #include <lvgl.h>
 #include <Wire.h>
 #include <esp_timer.h>
+#include <esp_sleep.h>
+#include <driver/gpio.h>
 #include <memory>
 
 #include "Arduino_GFX_Library.h"
@@ -21,6 +28,42 @@ const int beePin = 42;     // Define GPIO42 for buzzer
 static constexpr int kSysEnPin = 41; // Schematic: SYS_EN -> GPIO41, set as OUTPUT
 static constexpr int kSysOutPin = 40; // Schematic: SYS_OUT -> GPIO40 -> PWR btn, set as INPUT
 
+static constexpr int kModePin = 0; // Schematic: GPIO0 = boot / used as Mode Button
+
+// ---- Buzzer helpers ----
+static bool g_beepActive = false;
+static uint32_t g_beepUntilMs = 0;
+
+static inline void start_beep(uint16_t hz, uint32_t durationMs)
+{
+  tone(beePin, hz);
+  g_beepActive = true;
+  g_beepUntilMs = millis() + durationMs;
+}
+
+static inline void beep_poll()
+{
+  if (!g_beepActive) return;
+  if ((int32_t)(millis() - g_beepUntilMs) < 0) return;
+  g_beepActive = false;
+  noTone(beePin);
+}
+
+
+
+static inline void play_welcome_sound()
+{
+  // Short, bright startup arpeggio (~240ms total).
+  // Using tone()/noTone() for consistency with the rest of this sketch.
+  static constexpr uint16_t kNotesHz[] = { 1047, 1319, 1568, 2093 }; // C6 E6 G6 C7
+  for (uint16_t hz : kNotesHz) {
+    tone(beePin, hz);
+    delay(45);
+    noTone(beePin);
+    delay(15);
+  }
+}
+
 static TaskHandle_t g_imuTaskHandle = nullptr;
 
 // ---- LVGL tick ----
@@ -35,6 +78,17 @@ static constexpr uint32_t kUiFramePeriodMs = 33; // ~30.3 Hz
 // Dims after 10s of no button/touch and no significant motion.
 static constexpr uint32_t kInactivityDimAfterMs = 5'000;
 static constexpr uint32_t kMotionActivityHoldMs = 2'000; // keep "active" briefly after motion
+
+// ---- Power-off ("sleep") ----
+// Requirements:
+// - 15s of inactivity -> enter ESP sleep (wake via SYS_OUT / PWR button)
+// - Long-press PWR (SYS_OUT LOW while pressed) -> enter ESP sleep
+static constexpr uint32_t kInactivitySleepAfterMs = 15'000;
+static constexpr uint32_t kPwrLongPressMs = 2'000;
+static constexpr uint32_t kPwrDebounceMs = 50;
+static constexpr uint32_t kPwrIgnoreAfterBootMs = 3'000;
+static constexpr uint32_t kPwrReleaseWaitTimeoutMs = 5'000;
+static constexpr uint32_t kPwrIgnoreAfterWakeMs = 1'500;
 
 static constexpr uint8_t kBacklightFull = 255; // 0..255
 static constexpr uint8_t kBacklightDim  = 25;  // tweak to taste (lower = darker, less power)
@@ -81,6 +135,131 @@ static void backlight_idle_manager()
   const uint8_t target = shouldDim ? kBacklightDim : kBacklightFull;
   if (target != g_backlightDuty) {
     backlight_set(target);
+  }
+}
+
+static uint32_t g_bootMs = 0;
+static uint32_t g_wakeMs = 0;
+static bool g_powerOffInitiated = false;
+
+// ---- Long-press detection state (resettable) ----
+static int g_pwrLastLevel = HIGH;
+static uint32_t g_pwrLastLevelChangeMs = 0;
+static bool g_pwrPressedStable = false;
+static uint32_t g_pwrPressStartMs = 0;
+
+static inline void reset_power_button_state()
+{
+  g_pwrLastLevel = digitalRead(kSysOutPin);
+  g_pwrLastLevelChangeMs = millis();
+  g_pwrPressedStable = false;
+  g_pwrPressStartMs = 0;
+}
+
+static void enter_poweroff_sleep(const char *reason, const bool wait_for_pwr_release)
+{
+  if (g_powerOffInitiated) return;
+  g_powerOffInitiated = true;
+
+  // Best-effort logs; USBSerial/screen power may stop once we enter sleep.
+  if (reason) {
+    USBSerial.print("Power off: ");
+    USBSerial.println(reason);
+    USBSerial.flush();
+  }
+
+  // Audible confirmation before cutting power: Descending "do-sol-mi-do" (C-G-E-C) tone
+  tone(beePin, 523); // C5 (do)
+  delay(80);
+  tone(beePin, 392); // G4 (sol)
+  delay(80);
+  tone(beePin, 330); // E4 (mi)
+  delay(80);
+  tone(beePin, 261); // C4 (do, lower octave)
+  delay(100);
+  noTone(beePin);
+
+  // Make the backlight transition look nicer before cutting power.
+  backlight_set(kBacklightDim);
+  delay(30);
+
+  // Try the original "hard power-off" path first.
+  // - On battery: SYS_EN LOW should physically cut VBAT (no code after this runs).
+  // - On USB: SYS_EN LOW often doesn't fully power down, so we fall back to ESP sleep.
+  digitalWrite(kSysEnPin, LOW);
+  delay(50);
+
+  // Ensure a clean sleep entry for long-press: SYS_OUT is LOW while pressed.
+  // If we enter sleep while it is already LOW and wake is configured on LOW,
+  // the CPU may wake immediately. So wait for release before sleeping.
+  if (wait_for_pwr_release) {
+    const uint32_t startMs = millis();
+    while (digitalRead(kSysOutPin) == LOW && (millis() - startMs) < kPwrReleaseWaitTimeoutMs) {
+      delay(10);
+    }
+  }
+
+  // IMPORTANT:
+  // - SYS_OUT is on GPIO40.
+  // - On ESP32-S3, deep-sleep EXT0/EXT1 wake requires RTC IO pins; GPIO40 is NOT RTC IO.
+  // Therefore, use LIGHT SLEEP with GPIO wakeup for the USB fallback path.
+
+  // Configure wake on SYS_OUT (PWR button) asserting LOW.
+  // (This is level-based; a short press is enough to wake.)
+  gpio_wakeup_enable((gpio_num_t)kSysOutPin, GPIO_INTR_LOW_LEVEL);
+  esp_sleep_enable_gpio_wakeup();
+
+  // Drop backlight to minimize draw before the CPU sleeps.
+  backlight_set(0);
+  delay(10);
+
+  // Enter light sleep; execution resumes here after wake.
+  esp_light_sleep_start();
+
+  // After wake: re-latch SYS_EN high (in case SYS_EN LOW partially affected rails on USB).
+  digitalWrite(kSysEnPin, HIGH);
+  backlight_set(kBacklightFull);
+  mark_user_activity();
+  g_wakeMs = millis();
+  reset_power_button_state();
+  g_powerOffInitiated = false;
+}
+
+static void power_sleep_manager()
+{
+  const uint32_t now = millis();
+  if (now - g_bootMs < kPwrIgnoreAfterBootMs) return; // don't sleep during boot/setup
+  if (g_wakeMs != 0 && (now - g_wakeMs) < kPwrIgnoreAfterWakeMs) return; // don't sleep right after wake
+
+  // ---- Long-press detection on SYS_OUT (PWR button) ----
+  // SYS_OUT is LOW while the PWR button is pressed.
+  const int level = digitalRead(kSysOutPin);
+  if (level != g_pwrLastLevel) {
+    g_pwrLastLevel = level;
+    g_pwrLastLevelChangeMs = now;
+  }
+
+  if ((now - g_pwrLastLevelChangeMs) >= kPwrDebounceMs) {
+    const bool pressed = (level == LOW);
+    if (pressed) {
+      if (!g_pwrPressedStable) {
+        g_pwrPressedStable = true;
+        g_pwrPressStartMs = now;
+      } else {
+        const uint32_t heldMs = now - g_pwrPressStartMs;
+        if (heldMs >= kPwrLongPressMs) {
+          enter_poweroff_sleep("PWR long press", /*wait_for_pwr_release=*/true);
+        }
+      }
+    } else {
+      g_pwrPressedStable = false;
+    }
+  }
+
+  // ---- Inactivity sleep ----
+  const uint32_t lastAny = (g_lastMotionActivityMs > g_lastUserActivityMs) ? g_lastMotionActivityMs : g_lastUserActivityMs;
+  if (lastAny != 0 && (now - lastAny) >= kInactivitySleepAfterMs) {
+    enter_poweroff_sleep("inactivity", /*wait_for_pwr_release=*/false);
   }
 }
 
@@ -135,6 +314,12 @@ enum class AppMode : uint8_t {
 };
 
 static AppMode g_mode = AppMode::RelAngle;
+static constexpr uint8_t kAppModeCount = 2;
+
+static inline AppMode next_mode(AppMode m)
+{
+  return (AppMode)(((uint8_t)m + 1u) % kAppModeCount);
+}
 
 // ---- Touch (CST816T) ----
 static std::shared_ptr<Arduino_IIC_DriveBus> IIC_Bus =
@@ -215,6 +400,12 @@ static inline float clampf(float v, float lo, float hi)
 }
 
 static inline float rad2deg(float r) { return r * 57.29577951308232f; }
+
+static inline float round_to_step(float v, float step)
+{
+  if (!(step > 0.0f) || !isfinite(v)) return v;
+  return roundf(v / step) * step;
+}
 
 static inline float safe_norm3(float x, float y, float z)
 {
@@ -542,6 +733,11 @@ static void do_calibration_action()
   switch (g_mode) {
     case AppMode::RelAngle:
       imu_set_reference_normal_now();
+      tone(beePin, 330); // mi
+      delay(45);
+      tone(beePin, 440); // ra
+      delay(45);
+      noTone(beePin);
       break;
     case AppMode::AbsAngle:
       break;
@@ -573,6 +769,7 @@ static uint8_t voltage_to_percent(float v)
 static void battery_poll_and_update()
 {
   static uint32_t lastMs = 0;
+  static bool lastLow = false;
   const uint32_t now = millis();
   if (now - lastMs < 1000) return;
   lastMs = now;
@@ -590,6 +787,7 @@ static void battery_poll_and_update()
   }
 
   g_battPct = voltage_to_percent(g_battVoltage);
+  const bool low = (g_battPct < 20);
 
   if (ui_batt_outline && ui_batt_fill) {
     // Outline size: 34x14 with 1px border, cap 3x8
@@ -597,6 +795,13 @@ static void battery_poll_and_update()
     const int fillW = (int)lroundf((innerW - 2) * (g_battPct / 100.0f)); // keep a small right padding
     const int clamped = (int)clampf((float)fillW, 0.0f, (float)(innerW - 2));
     lv_obj_set_width(ui_batt_fill, clamped);
+
+    if (low != lastLow) {
+      lastLow = low;
+      const lv_color_t c = low ? lv_palette_main(LV_PALETTE_RED) : lv_color_white();
+      lv_obj_set_style_bg_color(ui_batt_fill, c, 0);
+      if (ui_batt_text) lv_obj_set_style_text_color(ui_batt_text, c, 0);
+    }
 
     if (ui_batt_text) {
       char s[24];
@@ -681,7 +886,8 @@ static void ui_refresh()
       if (ui_secondary) lv_obj_add_flag(ui_secondary, LV_OBJ_FLAG_HIDDEN);
       if (ui_rel_zero_btn) lv_obj_clear_flag(ui_rel_zero_btn, LV_OBJ_FLAG_HIDDEN);
 
-      snprintf(relBig, sizeof(relBig), "%.2f°", s.rel_angle_deg);
+      const float relRounded = round_to_step(s.rel_angle_deg, 0.1f);
+      snprintf(relBig, sizeof(relBig), "%.1f°", relRounded);
       set_label_if_changed(ui_rel_angle_big, ui_last_rel_big, sizeof(ui_last_rel_big), relBig);
 
       snprintf(dbg, sizeof(dbg), "Ref: %s", s.ref_valid ? "SET" : "NOT SET");
@@ -737,7 +943,7 @@ static void ui_build()
 
   ui_batt_text = lv_label_create(lv_scr_act());
   lv_obj_set_style_text_font(ui_batt_text, &lv_font_montserrat_12, 0);
-  lv_obj_align_to(ui_batt_text, ui_batt_outline, LV_ALIGN_OUT_BOTTOM_RIGHT, -5, 2); // moved 5px more left
+  lv_obj_align_to(ui_batt_text, ui_batt_outline, LV_ALIGN_OUT_LEFT_MID, -3, 0); // place % to the left of battery
   lv_label_set_text(ui_batt_text, "--");
 
   // Inclinometer widget
@@ -821,6 +1027,17 @@ static void ui_build()
 
 static void setup_hardware()
 {
+  // Keep the board powered for soft-sleep. The PWR button asserts SYS_OUT,
+  // and we wake via the ESP sleep GPIO wakeup source.
+  pinMode(kSysEnPin, OUTPUT);
+  digitalWrite(kSysEnPin, HIGH);
+
+  // SYS_OUT is LOW while the user presses PWR.
+  pinMode(kSysOutPin, INPUT_PULLUP);
+
+  // Mode button (BOOT): active-low to GND.
+  pinMode(kModePin, INPUT_PULLUP);
+
   pinMode(kVoltageDividerPin, INPUT);
 
   gfx->begin();
@@ -829,9 +1046,6 @@ static void setup_hardware()
 
   pinMode(beePin, OUTPUT);  // avoids accidentally driving buzzer transistor
   digitalWrite(beePin, LOW);
-
-  pinMode(kSysEnPin, OUTPUT);
-  digitalWrite(kSysEnPin, HIGH);
 
   WiFi.mode(WIFI_OFF);
   btStop();
@@ -904,6 +1118,8 @@ void setup()
   USBSerial.begin(115200);
 
   setup_hardware();
+  play_welcome_sound();
+  g_bootMs = millis();
   setup_lvgl();
   setup_tasks();
 
@@ -912,9 +1128,52 @@ void setup()
 
 void loop()
 {
+  beep_poll();
+
+  // Short press on Mode button cycles app modes.
+  // Debounced edge detector with a max press time to qualify as "short".
+  {
+    static uint8_t lastReading = HIGH;
+    static uint8_t stable = HIGH;
+    static uint32_t lastChangeMs = 0;
+    static bool wasPressed = false;
+    static uint32_t pressStartMs = 0;
+
+    const uint32_t now = millis();
+    const uint8_t reading = (uint8_t)digitalRead(kModePin);
+
+    if (reading != lastReading) {
+      lastReading = reading;
+      lastChangeMs = now;
+    }
+
+    constexpr uint32_t kDebounceMs = 30;
+    if ((now - lastChangeMs) >= kDebounceMs && stable != lastReading) {
+      stable = lastReading;
+
+      if (stable == LOW) {
+        wasPressed = true;
+        pressStartMs = now;
+        mark_user_activity();
+      } else {
+        if (wasPressed) {
+          wasPressed = false;
+          const uint32_t heldMs = now - pressStartMs;
+          constexpr uint32_t kShortPressMaxMs = 500;
+          if (heldMs > 0 && heldMs <= kShortPressMaxMs) {
+            g_mode = next_mode(g_mode);
+            mark_user_activity();
+            start_beep(440, 60);
+          }
+        }
+      }
+    }
+  }
+
   // Throttle LVGL work to reduce CPU. ~30 Hz max for LVGL timers/animations.
   lv_timer_handler();
   delay(kUiFramePeriodMs);
   backlight_idle_manager();
+  power_sleep_manager();
 }
 
