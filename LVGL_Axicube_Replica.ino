@@ -93,13 +93,14 @@ static constexpr uint32_t kUiFramePeriodMs = 33; // ~30.3 Hz
 // ---- Backlight PWM + inactivity dimming ----
 // Dims after 10s of no button/touch and no significant motion.
 static constexpr uint32_t kInactivityDimAfterMs = 5'000;
+static constexpr uint32_t kInactivityScrOffAfterMs = 60'000;
 static constexpr uint32_t kMotionActivityHoldMs = 2'000; // keep "active" briefly after motion
 
 // ---- Power-off ("sleep") ----
 // Requirements:
 // - 15s of inactivity -> enter ESP sleep (wake via SYS_OUT / PWR button)
 // - Long-press PWR (SYS_OUT LOW while pressed) -> enter ESP sleep
-static constexpr uint32_t kInactivitySleepAfterMs = 15'000;
+static constexpr uint32_t kInactivitySleepAfterMs = 120'000;
 static constexpr uint32_t kPwrLongPressMs = 2'000;
 static constexpr uint32_t kPwrDebounceMs = 50;
 static constexpr uint32_t kPwrIgnoreAfterBootMs = 3'000;
@@ -108,6 +109,7 @@ static constexpr uint32_t kPwrIgnoreAfterWakeMs = 1'500;
 
 static constexpr uint8_t kBacklightFull = 255; // 0..255
 static constexpr uint8_t kBacklightDim  = 25;  // tweak to taste (lower = darker, less power)
+static constexpr uint8_t kBacklightOff  = 1;  // tweak to taste (lower = darker, less power)
 
 static constexpr uint32_t kBacklightPwmHz = 5000;
 static constexpr uint8_t  kBacklightPwmResBits = 8; // duty 0..255
@@ -146,9 +148,15 @@ static void backlight_idle_manager()
   const uint32_t lastAny = (g_lastMotionActivityMs > g_lastUserActivityMs) ? g_lastMotionActivityMs : g_lastUserActivityMs;
   const bool motionRecentlyActive = (now - g_lastMotionActivityMs) < kMotionActivityHoldMs;
   const uint32_t idleForMs = now - lastAny;
+  const bool shouldTurnOff = !motionRecentlyActive && idleForMs >= kInactivityScrOffAfterMs;
   const bool shouldDim = !motionRecentlyActive && idleForMs >= kInactivityDimAfterMs;
 
-  const uint8_t target = shouldDim ? kBacklightDim : kBacklightFull;
+  uint8_t target = kBacklightFull;
+  if (shouldTurnOff) {
+    target = kBacklightOff;
+  } else if (shouldDim) {
+    target = kBacklightDim;
+  }
   if (target != g_backlightDuty) {
     backlight_set(target);
   }
@@ -425,8 +433,8 @@ static void my_touchpad_read(lv_indev_drv_t * /*indev_driver*/, lv_indev_data_t 
 // ---- Battery (from 07_LVGL_Measuring_voltage) ----
 static constexpr int kVoltageDividerPin = 1; // GPIO1
 static constexpr float kVRef = 3.3f;
-static constexpr float kR1 = 200000.0f;
-static constexpr float kR2 = 100000.0f;
+static constexpr float kR1 = 143000.0f;
+static constexpr float kR2 = 65000.0f;
 
 static float g_battVoltage = NAN;
 static uint8_t g_battPct = 0;
@@ -735,7 +743,7 @@ static void battery_poll_and_update()
     if (ui_batt_text) {
       char s[24];
       // snprintf(s, sizeof(s), "%u%%", (unsigned)g_battPct);
-      snprintf(s, sizeof(s), "%.2fV", g_battVoltage);
+      snprintf(s, sizeof(s), "%d, %.2fV", adcValue, g_battVoltage);
       lv_label_set_text(ui_batt_text, s);
     }
   }
@@ -796,14 +804,14 @@ static void ui_build()
 
   ui_mode = lv_label_create(lv_scr_act());
   lv_obj_set_style_text_font(ui_mode, &lv_font_montserrat_20, 0);
-  lv_obj_align(ui_mode, LV_ALIGN_TOP_LEFT, 13, 6);
+  lv_obj_align(ui_mode, LV_ALIGN_TOP_LEFT, 17, 6);
   lv_label_set_text(ui_mode, "REL");
 
   // Battery widget (top-right)
   ui_batt_outline = lv_obj_create(lv_scr_act());
   lv_obj_remove_style_all(ui_batt_outline);
   lv_obj_set_size(ui_batt_outline, 34, 14);
-  lv_obj_align(ui_batt_outline, LV_ALIGN_TOP_RIGHT, -13, 8); // moved 5px more left
+  lv_obj_align(ui_batt_outline, LV_ALIGN_TOP_RIGHT, -17, 8); // moved 5px more left
   lv_obj_set_style_border_width(ui_batt_outline, 1, 0);
   lv_obj_set_style_border_color(ui_batt_outline, lv_color_white(), 0);
   lv_obj_set_style_radius(ui_batt_outline, 2, 0);
@@ -827,7 +835,7 @@ static void ui_build()
 
   ui_batt_text = lv_label_create(lv_scr_act());
   lv_obj_set_style_text_font(ui_batt_text, &lv_font_montserrat_12, 0);
-  lv_obj_align_to(ui_batt_text, ui_batt_outline, LV_ALIGN_OUT_LEFT_MID, -3, 0); // place % to the left of battery
+  lv_obj_align_to(ui_batt_text, ui_batt_outline, LV_ALIGN_OUT_LEFT_MID, -35, 0); // place % to the left of battery
   lv_label_set_text(ui_batt_text, "--");
 
   // Inclinometer widget
