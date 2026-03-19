@@ -1,3 +1,13 @@
+// Using library Driver Bus Library Based on Arduino v1.0.1
+// Using library GFX Library for Arduino v1.6.5
+// Using library Mylibrary (legacy)
+// Using library SensorLib v0.2.1
+// Using library lvgl v8.4.0
+// Using library Networking v3.3.7
+// Using library SPI v3.3.7
+// Using library WiFi v3.3.7
+// Using library Wire v3.3.7
+
 #include <stdint.h>
 
 // Forward declaration to survive Arduino auto-prototypes.
@@ -842,7 +852,8 @@ static void battery_poll_and_update()
 
     if (ui_batt_text) {
       char s[24];
-      snprintf(s, sizeof(s), "%u%%", (unsigned)g_battPct);
+      // snprintf(s, sizeof(s), "%u%%", (unsigned)g_battPct);
+      snprintf(s, sizeof(s), "%.2fV", g_battVoltage);
       lv_label_set_text(ui_batt_text, s);
     }
   }
