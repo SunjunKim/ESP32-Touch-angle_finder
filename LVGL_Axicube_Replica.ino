@@ -20,6 +20,10 @@ enum class AppMode : uint8_t;
 #include "HWCDC.h"
 #include "WiFi.h"
 
+#include "src/pages/abs_page.h"
+#include "src/pages/rel_page.h"
+#include "src/pages/page_types.h"
+
 LV_FONT_DECLARE(lv_font_roboto_mono_48);
 
 HWCDC USBSerial;
@@ -319,6 +323,55 @@ static constexpr uint8_t kAppModeCount = 2;
 static inline AppMode next_mode(AppMode m)
 {
   return (AppMode)(((uint8_t)m + 1u) % kAppModeCount);
+}
+
+// ---- Mode button (short-press to switch ABS/REL) ----
+static constexpr uint32_t kModeDebounceMs = 30;
+static constexpr uint32_t kModeShortPressMaxMs = 500;
+static constexpr uint16_t kModeSwitchBeepHz = 440;
+static constexpr uint32_t kModeSwitchBeepMs = 60;
+
+struct ModeButtonState {
+  uint8_t lastReading = HIGH;
+  uint8_t stable = HIGH;
+  uint32_t lastChangeMs = 0;
+  bool wasPressed = false;
+  uint32_t pressStartMs = 0;
+};
+
+static ModeButtonState g_modeButton;
+
+static void mode_button_poll()
+{
+  const uint32_t now = millis();
+  const uint8_t reading = (uint8_t)digitalRead(kModePin);
+
+  if (reading != g_modeButton.lastReading) {
+    g_modeButton.lastReading = reading;
+    g_modeButton.lastChangeMs = now;
+  }
+
+  const bool debounced = (now - g_modeButton.lastChangeMs) >= kModeDebounceMs;
+  const bool changed = (g_modeButton.stable != g_modeButton.lastReading);
+  if (!debounced || !changed) return;
+
+  g_modeButton.stable = g_modeButton.lastReading;
+  if (g_modeButton.stable == LOW) {
+    g_modeButton.wasPressed = true;
+    g_modeButton.pressStartMs = now;
+    mark_user_activity();
+    return;
+  }
+
+  if (!g_modeButton.wasPressed) return;
+  g_modeButton.wasPressed = false;
+
+  const uint32_t heldMs = now - g_modeButton.pressStartMs;
+  if (heldMs > 0 && heldMs <= kModeShortPressMaxMs) {
+    g_mode = next_mode(g_mode);
+    mark_user_activity();
+    start_beep(kModeSwitchBeepHz, kModeSwitchBeepMs);
+  }
 }
 
 // ---- Touch (CST816T) ----
@@ -691,13 +744,6 @@ static lv_obj_t *ui_incl_cross_h = nullptr;
 static lv_obj_t *ui_incl_cross_v = nullptr;
 static lv_obj_t *ui_rel_angle_big = nullptr;
 
-// ---- UI caching to avoid unnecessary redraws ----
-static char ui_last_line1[64] = {0};
-static char ui_last_line2[64] = {0};
-static char ui_last_dbg[96] = {0};
-static char ui_last_rel_big[64] = {0};
-static int ui_last_bubble_x = INT32_MIN;
-static int ui_last_bubble_y = INT32_MIN;
 static AppMode ui_last_mode = (AppMode)255;
 static bool ui_last_bg_is_red = false;
 
@@ -716,15 +762,6 @@ static void ui_update_background(bool relRefValid)
   if (wantRed == ui_last_bg_is_red) return;
   ui_last_bg_is_red = wantRed;
   lv_obj_set_style_bg_color(lv_scr_act(), wantRed ? lv_palette_main(LV_PALETTE_RED) : lv_color_black(), 0);
-}
-
-static void set_label_if_changed(lv_obj_t *label, char *cache, size_t cacheLen, const char *next)
-{
-  if (!label || !next) return;
-  if (strncmp(cache, next, cacheLen) == 0) return;
-  strncpy(cache, next, cacheLen - 1);
-  cache[cacheLen - 1] = '\0';
-  lv_label_set_text(label, cache);
 }
 
 static void do_calibration_action()
@@ -820,28 +857,6 @@ static void ui_set_mode_label()
   }
 }
 
-static void ui_update_inclinometer(float pitchDeg, float rollDeg)
-{
-  if (!ui_incl_container || !ui_incl_bubble) return;
-
-  // Map +/- 45deg into the bubble motion range.
-  const float maxDeg = 45.0f;
-  const float pxRange = 40.0f; // container roughly 100x100 => bubble can move within +/-40
-
-  const float dx = clampf(rollDeg / maxDeg, -1.0f, 1.0f) * pxRange;
-  const float dy = -clampf(pitchDeg / maxDeg, -1.0f, 1.0f) * pxRange;
-
-  const int cx = 50;
-  const int cy = 50;
-  const int bx = (int)lroundf(cx + dx - 8);
-  const int by = (int)lroundf(cy + dy - 8);
-  if (bx != ui_last_bubble_x || by != ui_last_bubble_y) {
-    ui_last_bubble_x = bx;
-    ui_last_bubble_y = by;
-    lv_obj_set_pos(ui_incl_bubble, bx, by);
-  }
-}
-
 static void ui_refresh()
 {
   ImuState s;
@@ -857,46 +872,22 @@ static void ui_refresh()
   }
   battery_poll_and_update();
 
-  if (!ui_primary || !ui_secondary) return;
-
-  char line1[64];
-  char line2[64];
-  char dbg[96];
-  char relBig[64];
-  dbg[0] = '\0';
+  ImuUiData ui_imu;
+  ui_imu.pitch_deg = s.pitch_deg;
+  ui_imu.roll_deg = s.roll_deg;
+  ui_imu.rel_angle_deg = s.rel_angle_deg;
+  ui_imu.ref_valid = s.ref_valid;
 
   switch (g_mode) {
-    case AppMode::AbsAngle: {
-      if (ui_incl_container) lv_obj_clear_flag(ui_incl_container, LV_OBJ_FLAG_HIDDEN);
-      if (ui_rel_angle_big) lv_obj_add_flag(ui_rel_angle_big, LV_OBJ_FLAG_HIDDEN);
-      if (ui_primary) lv_obj_clear_flag(ui_primary, LV_OBJ_FLAG_HIDDEN);
-      if (ui_secondary) lv_obj_clear_flag(ui_secondary, LV_OBJ_FLAG_HIDDEN);
-      if (ui_rel_zero_btn) lv_obj_add_flag(ui_rel_zero_btn, LV_OBJ_FLAG_HIDDEN);
-      snprintf(line1, sizeof(line1), "Pitch: %.2f°", s.pitch_deg);
-      snprintf(line2, sizeof(line2), "Roll : %.2f°", s.roll_deg);
-      set_label_if_changed(ui_primary, ui_last_line1, sizeof(ui_last_line1), line1);
-      set_label_if_changed(ui_secondary, ui_last_line2, sizeof(ui_last_line2), line2);
-      ui_update_inclinometer(s.pitch_deg, s.roll_deg);
+    case AppMode::AbsAngle:
+      ui_pages::abs_show(ui_incl_container, ui_rel_angle_big, ui_primary, ui_secondary, ui_rel_zero_btn);
+      ui_pages::abs_update(ui_primary, ui_secondary, ui_incl_container, ui_incl_bubble, ui_imu);
+      if (ui_debug) lv_label_set_text(ui_debug, "");
       break;
-    }
-    case AppMode::RelAngle: {
-      if (ui_incl_container) lv_obj_add_flag(ui_incl_container, LV_OBJ_FLAG_HIDDEN);
-      if (ui_rel_angle_big) lv_obj_clear_flag(ui_rel_angle_big, LV_OBJ_FLAG_HIDDEN);
-      if (ui_primary) lv_obj_add_flag(ui_primary, LV_OBJ_FLAG_HIDDEN);
-      if (ui_secondary) lv_obj_add_flag(ui_secondary, LV_OBJ_FLAG_HIDDEN);
-      if (ui_rel_zero_btn) lv_obj_clear_flag(ui_rel_zero_btn, LV_OBJ_FLAG_HIDDEN);
-
-      const float relRounded = round_to_step(s.rel_angle_deg, 0.1f);
-      snprintf(relBig, sizeof(relBig), "%.1f°", relRounded);
-      set_label_if_changed(ui_rel_angle_big, ui_last_rel_big, sizeof(ui_last_rel_big), relBig);
-
-      snprintf(dbg, sizeof(dbg), "Ref: %s", s.ref_valid ? "SET" : "NOT SET");
+    case AppMode::RelAngle:
+      ui_pages::rel_show(ui_incl_container, ui_rel_angle_big, ui_primary, ui_secondary, ui_rel_zero_btn);
+      ui_pages::rel_update(ui_rel_angle_big, ui_debug, ui_imu);
       break;
-    }
-  }
-
-  if (ui_debug) {
-    set_label_if_changed(ui_debug, ui_last_dbg, sizeof(ui_last_dbg), dbg);
   }
 }
 
@@ -1129,46 +1120,7 @@ void setup()
 void loop()
 {
   beep_poll();
-
-  // Short press on Mode button cycles app modes.
-  // Debounced edge detector with a max press time to qualify as "short".
-  {
-    static uint8_t lastReading = HIGH;
-    static uint8_t stable = HIGH;
-    static uint32_t lastChangeMs = 0;
-    static bool wasPressed = false;
-    static uint32_t pressStartMs = 0;
-
-    const uint32_t now = millis();
-    const uint8_t reading = (uint8_t)digitalRead(kModePin);
-
-    if (reading != lastReading) {
-      lastReading = reading;
-      lastChangeMs = now;
-    }
-
-    constexpr uint32_t kDebounceMs = 30;
-    if ((now - lastChangeMs) >= kDebounceMs && stable != lastReading) {
-      stable = lastReading;
-
-      if (stable == LOW) {
-        wasPressed = true;
-        pressStartMs = now;
-        mark_user_activity();
-      } else {
-        if (wasPressed) {
-          wasPressed = false;
-          const uint32_t heldMs = now - pressStartMs;
-          constexpr uint32_t kShortPressMaxMs = 500;
-          if (heldMs > 0 && heldMs <= kShortPressMaxMs) {
-            g_mode = next_mode(g_mode);
-            mark_user_activity();
-            start_beep(440, 60);
-          }
-        }
-      }
-    }
-  }
+  mode_button_poll();
 
   // Throttle LVGL work to reduce CPU. ~30 Hz max for LVGL timers/animations.
   lv_timer_handler();
