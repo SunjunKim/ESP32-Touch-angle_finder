@@ -19,6 +19,7 @@ enum class AppMode : uint8_t;
 #include <esp_timer.h>
 #include <esp_sleep.h>
 #include <driver/gpio.h>
+#include <freertos/semphr.h>
 #include <memory>
 
 #include "Arduino_GFX_Library.h"
@@ -43,6 +44,7 @@ static constexpr int kSysEnPin = 41; // Schematic: SYS_EN -> GPIO41, set as OUTP
 static constexpr int kSysOutPin = 40; // Schematic: SYS_OUT -> GPIO40 -> PWR btn, set as INPUT
 
 static constexpr int kModePin = 0; // Schematic: GPIO0 = boot / used as Mode Button
+static constexpr int kImuIntPin = 38; // QMI8658 INT1 -> GPIO38
 
 // ---- Buzzer helpers ----
 static bool g_beepActive = false;
@@ -431,6 +433,18 @@ static uint8_t g_battPct = 0;
 
 // ---- IMU / angle state ----
 static SensorQMI8658 qmi;
+static SemaphoreHandle_t g_imuIntSem = nullptr;
+
+static void IRAM_ATTR imu_int_isr()
+{
+  BaseType_t higherPrioTaskWoken = pdFALSE;
+  if (g_imuIntSem != nullptr) {
+    xSemaphoreGiveFromISR(g_imuIntSem, &higherPrioTaskWoken);
+  }
+  if (higherPrioTaskWoken == pdTRUE) {
+    portYIELD_FROM_ISR();
+  }
+}
 
 struct ImuState {
   float ax_g = 0.0f;
@@ -498,10 +512,7 @@ static void imu_set_reference_normal_now()
 
 static void imu_task(void * /*param*/)
 {
-  // Bring up QMI8658 in a stable 6DOF configuration (acc + gyro).
-  // Reason: accel-only "tilt" can appear to drift over time due to slow bias/temperature changes.
-  // We instead track a gravity vector with gyro integration and slowly correct with the accelerometer
-  // (a complementary fusion that is stable and resistant to bias).
+  // Bring up QMI8658 in a simple raw-read configuration (acc + gyro).
   if (!qmi.begin(Wire, QMI8658_L_SLAVE_ADDRESS, IIC_SDA, IIC_SCL)) {
     portENTER_CRITICAL(&g_imuMux);
     g_imu.inited = false;
@@ -512,97 +523,42 @@ static void imu_task(void * /*param*/)
   // "Stable" choice: modest ODR + LPF enabled.
   qmi.configAccelerometer(
     SensorQMI8658::ACC_RANGE_2G,
-    SensorQMI8658::ACC_ODR_62_5Hz,
-    SensorQMI8658::LPF_MODE_3,
-    true,
-    true
+    SensorQMI8658::ACC_ODR_250Hz,
+    SensorQMI8658::LPF_MODE_0,
+    true,   // LPF enable
+    false   // self-test disable
   );
   qmi.enableAccelerometer();
 
   qmi.configGyroscope(
-    SensorQMI8658::GYR_RANGE_64DPS,
-    SensorQMI8658::GYR_ODR_56_05Hz,
-    SensorQMI8658::LPF_MODE_3,
+    SensorQMI8658::GYR_RANGE_128DPS,
+    SensorQMI8658::GYR_ODR_224_2Hz,
+    SensorQMI8658::LPF_MODE_0,
     true,
-    true
+    false
   );
   qmi.enableGyroscope();
 
-  // --- Startup calibration (assumes the device is stationary for a short moment) ---
-  // Gyro bias dominates "drift" when integrating. Estimate it on boot.
-  float gyro_bias_x = 0.0f, gyro_bias_y = 0.0f, gyro_bias_z = 0.0f;
-  float acc_mean_x = 0.0f, acc_mean_y = 0.0f, acc_mean_z = 0.0f;
-  int cal_n = 0;
+  qmi.enableLockingMechanism();
+  qmi.enableINT(SensorQMI8658::IntPin1);
 
-  const uint32_t cal_start_ms = millis();
-  while (millis() - cal_start_ms < 1200) {
-    if (!qmi.getDataReady()) {
-      vTaskDelay(pdMS_TO_TICKS(2));
-      continue;
-    }
-    float ax, ay, az, gx, gy, gz;
-    if (!qmi.getAccelerometer(ax, ay, az)) continue;
-    if (!qmi.getGyroscope(gx, gy, gz)) continue;
-    gyro_bias_x += gx;
-    gyro_bias_y += gy;
-    gyro_bias_z += gz;
-    acc_mean_x += ax;
-    acc_mean_y += ay;
-    acc_mean_z += az;
-    cal_n++;
-    vTaskDelay(pdMS_TO_TICKS(2));
-  }
-
-  if (cal_n > 0) {
-    const float inv = 1.0f / (float)cal_n;
-    gyro_bias_x *= inv;
-    gyro_bias_y *= inv;
-    gyro_bias_z *= inv;
-    acc_mean_x *= inv;
-    acc_mean_y *= inv;
-    acc_mean_z *= inv;
-  }
-
-  // Simple accel DC correction based on the stationary mean.
-  // Assumption: when stationary, the *true* acceleration is gravity with magnitude 1g.
-  // We estimate an additive bias = measured_mean - (measured_mean normalized to 1g).
-  float acc_unit_x = acc_mean_x, acc_unit_y = acc_mean_y, acc_unit_z = acc_mean_z;
-  normalize3(acc_unit_x, acc_unit_y, acc_unit_z);
-  const float acc_off_x = (cal_n > 0) ? (acc_mean_x - acc_unit_x) : 0.0f;
-  const float acc_off_y = (cal_n > 0) ? (acc_mean_y - acc_unit_y) : 0.0f;
-  const float acc_off_z = (cal_n > 0) ? (acc_mean_z - acc_unit_z) : 0.0f;
-
-  // Filtered accel + gravity estimate (unit vector, in sensor frame).
-  float fax = 0.0f, fay = 0.0f, faz = 0.0f;
-  bool seeded = false;
-  float gex = 0.0f, gey = 0.0f, gez = 1.0f;
-
-  // --- Inactivity (stand-still) motion sensitivity ---
-  // "Common sense" defaults: ignore small IMU jitter; only treat as motion when the device
-  // actually changes orientation or experiences a noticeable acceleration bump.
-  //
-  // NOTE: Higher thresholds => LESS sensitive motion detection => easier to reach "inactivity".
-  static constexpr float kIdleDetectAngleDeltaDeg = 1.5f;  // degrees
-  static constexpr float kIdleDetectAccMagDeltaG  = 0.12f; // g
-
-  // Compare against a slowly-updated "still reference" to avoid noise sensitivity.
-  float stillRefPitch = 0.0f;
-  float stillRefRoll = 0.0f;
-  float stillRefAccMag = 1.0f;
-  bool stillRefValid = false;
-  static constexpr float kStillRefAlpha = 0.02f; // smaller => reference changes slowly (better jitter rejection)
-
-  // ~50 Hz sampling target (reduces power; still smooth at ~15 Hz UI).
-  const TickType_t period = pdMS_TO_TICKS(20);
-  TickType_t lastWake = xTaskGetTickCount();
-  uint64_t last_us = esp_timer_get_time();
+  // INT-driven IMU reads: wait for data-ready interrupt.
+  // Keep a timeout as a resilience fallback.
+  const TickType_t intWait = pdMS_TO_TICKS(100);
+  float prev_ax = 0.0f, prev_ay = 0.0f, prev_az = 0.0f;
+  bool prev_valid = false;
+  static constexpr float kMotionDeltaG = 0.08f;
 
   portENTER_CRITICAL(&g_imuMux);
   g_imu.inited = true;
   portEXIT_CRITICAL(&g_imuMux);
 
   for (;;) {
-    vTaskDelayUntil(&lastWake, period);
+    if (g_imuIntSem != nullptr) {
+      (void)xSemaphoreTake(g_imuIntSem, intWait);
+    } else {
+      vTaskDelay(pdMS_TO_TICKS(20));
+    }
 
     if (!qmi.getDataReady()) {
       continue;
@@ -616,105 +572,31 @@ static void imu_task(void * /*param*/)
       continue;
     }
 
-    // Apply coarse calibration
-    gx -= gyro_bias_x;
-    gy -= gyro_bias_y;
-    gz -= gyro_bias_z;
-    ax -= acc_off_x;
-    ay -= acc_off_y;
-    az -= acc_off_z;
+    // Raw accelerometer vector is used directly.
+    const float pitch = rad2deg(atan2f(ax, sqrtf(ay * ay + az * az)));
+    const float roll  = rad2deg(atan2f(ay, sqrtf(ax * ax + az * az)));
 
-    if (!seeded) {
-      fax = ax;
-      fay = ay;
-      faz = az;
-      seeded = true;
-      // Seed gravity estimate from the first accelerometer sample.
-      gex = fax;
-      gey = fay;
-      gez = faz;
-      normalize3(gex, gey, gez);
-    } else {
-      // 1-pole low-pass for accel used in the fusion correction term.
-      constexpr float alpha = 0.10f;
-      fax = fax + alpha * (ax - fax);
-      fay = fay + alpha * (ay - fay);
-      faz = faz + alpha * (az - faz);
-    }
-
-    // --- Complementary fusion on gravity vector ---
-    const uint64_t now_us = esp_timer_get_time();
-    float dt = (now_us > last_us) ? (float)(now_us - last_us) * 1e-6f : 0.01f;
-    last_us = now_us;
-    dt = clampf(dt, 0.001f, 0.05f);
-
-    // Integrate gyro: update gravity estimate by small-angle rotation.
-    // Gyro units are deg/s in this library.
-    const float wx = gx * 0.017453292519943295f;
-    const float wy = gy * 0.017453292519943295f;
-    const float wz = gz * 0.017453292519943295f;
-
-    // dg/dt = - w x g   (gravity vector expressed in body/sensor frame)
-    const float cx = (wy * gez - wz * gey);
-    const float cy = (wz * gex - wx * gez);
-    const float cz = (wx * gey - wy * gex);
-    gex -= cx * dt;
-    gey -= cy * dt;
-    gez -= cz * dt;
-    normalize3(gex, gey, gez);
-
-    // Accelerometer correction (low-frequency reference).
-    float axn = fax, ayn = fay, azn = faz;
-    normalize3(axn, ayn, azn);
-    // beta sets how quickly we trust accel for long-term leveling. Smaller = smoother, less vibration sensitivity.
-    constexpr float beta = 0.1f;
-    gex = (1.0f - beta) * gex + beta * axn;
-    gey = (1.0f - beta) * gey + beta * ayn;
-    gez = (1.0f - beta) * gez + beta * azn;
-    normalize3(gex, gey, gez);
-
-    // Compute pitch/roll from the fused gravity vector.
-    // Keep the sketch's original conventions so UI behavior stays consistent.
-    const float pitch = rad2deg(atan2f(gex, sqrtf(gey * gey + gez * gez)));
-    const float roll  = rad2deg(atan2f(gey, sqrtf(gex * gex + gez * gez)));
-
-    // --- Significant movement detection (for inactivity dimming) ---
-    // Compare to a "still reference" (slow-moving baseline) so tiny jitter doesn't count.
-    // Also include accel magnitude change to catch linear motion while staying level.
-    const float accMag = safe_norm3(fax, fay, faz);
-    if (!stillRefValid) {
-      stillRefPitch = pitch;
-      stillRefRoll = roll;
-      stillRefAccMag = accMag;
-      stillRefValid = true;
+    if (!prev_valid) {
+      prev_ax = ax;
+      prev_ay = ay;
+      prev_az = az;
+      prev_valid = true;
       mark_motion_activity();
     } else {
-      const float dp = fabsf(pitch - stillRefPitch);
-      const float dr = fabsf(roll - stillRefRoll);
-      const float dMag = fabsf(accMag - stillRefAccMag);
-
-      const bool isMotion = (dp > kIdleDetectAngleDeltaDeg) ||
-                            (dr > kIdleDetectAngleDeltaDeg) ||
-                            (dMag > kIdleDetectAccMagDeltaG);
-      if (isMotion) {
+      const float delta = safe_norm3(ax - prev_ax, ay - prev_ay, az - prev_az);
+      if (delta >= kMotionDeltaG) {
         mark_motion_activity();
-        // Reset baseline to current state after motion so we don't re-trigger repeatedly.
-        stillRefPitch = pitch;
-        stillRefRoll = roll;
-        stillRefAccMag = accMag;
-      } else {
-        // Slowly adapt baseline while "still" (rejects drift but ignores jitter).
-        stillRefPitch = stillRefPitch + kStillRefAlpha * (pitch - stillRefPitch);
-        stillRefRoll  = stillRefRoll  + kStillRefAlpha * (roll  - stillRefRoll);
-        stillRefAccMag = stillRefAccMag + kStillRefAlpha * (accMag - stillRefAccMag);
       }
+      prev_ax = ax;
+      prev_ay = ay;
+      prev_az = az;
     }
 
     portENTER_CRITICAL(&g_imuMux);
-    // Expose the fused gravity vector (unit-ish), since that's what the angles come from.
-    g_imu.ax_g = gex;
-    g_imu.ay_g = gey;
-    g_imu.az_g = gez;
+    // Expose raw accelerometer readings from the chip.
+    g_imu.ax_g = ax;
+    g_imu.ay_g = ay;
+    g_imu.az_g = az;
 
     g_imu.pitch_deg = pitch;
     g_imu.roll_deg = roll;
@@ -722,10 +604,10 @@ static void imu_task(void * /*param*/)
     // REL mode: angle between current accel normal and reference normal.
     // This is an unsigned angle in [0..180], typically [0..90] for inclinometer use.
     if (g_imu.ref_valid) {
-      const float nCur = safe_norm3(gex, gey, gez);
+      const float nCur = safe_norm3(ax, ay, az);
       const float nRef = safe_norm3(g_imu.ref_ax_g, g_imu.ref_ay_g, g_imu.ref_az_g);
       if (nCur > 0.0f && nRef > 0.0f) {
-        float c = (gex * g_imu.ref_ax_g + gey * g_imu.ref_ay_g + gez * g_imu.ref_az_g) / (nCur * nRef);
+        float c = (ax * g_imu.ref_ax_g + ay * g_imu.ref_ay_g + az * g_imu.ref_az_g) / (nCur * nRef);
         c = clampf(c, -1.0f, 1.0f);
         g_imu.rel_angle_deg = rad2deg(acosf(c));
       }
@@ -1039,6 +921,7 @@ static void setup_hardware()
 
   // Mode button (BOOT): active-low to GND.
   pinMode(kModePin, INPUT_PULLUP);
+  pinMode(kImuIntPin, INPUT_PULLUP);
 
   pinMode(kVoltageDividerPin, INPUT);
 
@@ -1051,6 +934,15 @@ static void setup_hardware()
 
   WiFi.mode(WIFI_OFF);
   btStop();
+
+  if (g_imuIntSem == nullptr) {
+    g_imuIntSem = xSemaphoreCreateBinary();
+  }
+  if (g_imuIntSem != nullptr) {
+    // Drain any stale token before enabling IRQ.
+    while (xSemaphoreTake(g_imuIntSem, 0) == pdTRUE) {}
+  }
+  attachInterrupt(digitalPinToInterrupt(kImuIntPin), imu_int_isr, FALLING);
 
   Wire.begin(IIC_SDA, IIC_SCL);
 
