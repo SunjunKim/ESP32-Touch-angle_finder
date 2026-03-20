@@ -37,12 +37,14 @@ static void update_inclinometer(lv_obj_t *incl_container, lv_obj_t *incl_bubble,
   const float px_range = 40.0f;
 
   const float dx = clampf(roll_deg / max_deg, -1.0f, 1.0f) * px_range;
-  const float dy = -clampf(pitch_deg / max_deg, -1.0f, 1.0f) * px_range;
+  const float dy = clampf(pitch_deg / max_deg, -1.0f, 1.0f) * px_range;
 
-  const int cx = 50;
-  const int cy = 50;
-  const int bx = (int)lroundf(cx + dx - 8);
-  const int by = (int)lroundf(cy + dy - 8);
+  const float cx = lv_obj_get_width(incl_container) / 2.0f;
+  const float cy = lv_obj_get_height(incl_container) / 2.0f;
+  const float bubble_w = (float)lv_obj_get_width(incl_bubble);
+  const float bubble_h = (float)lv_obj_get_height(incl_bubble);
+  const int bx = (int)lroundf(cx + dx - bubble_w / 2.0f);
+  const int by = (int)lroundf(cy + dy - bubble_h / 2.0f);
   if (bx != s_last_bubble_x || by != s_last_bubble_y) {
     s_last_bubble_x = bx;
     s_last_bubble_y = by;
@@ -60,8 +62,16 @@ void abs_show(lv_obj_t *incl_container,
 {
   if (incl_container) lv_obj_clear_flag(incl_container, LV_OBJ_FLAG_HIDDEN);
   if (rel_angle_big) lv_obj_add_flag(rel_angle_big, LV_OBJ_FLAG_HIDDEN);
-  if (primary) lv_obj_clear_flag(primary, LV_OBJ_FLAG_HIDDEN);
-  if (secondary) lv_obj_clear_flag(secondary, LV_OBJ_FLAG_HIDDEN);
+  if (primary) {
+    lv_obj_clear_flag(primary, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_long_mode(primary, LV_LABEL_LONG_CLIP);
+    lv_obj_align(primary, LV_ALIGN_CENTER, 0, 60);
+  }
+  if (secondary) {
+    lv_obj_clear_flag(secondary, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_long_mode(secondary, LV_LABEL_LONG_CLIP);
+    lv_obj_align(secondary, LV_ALIGN_CENTER, 0, 84);
+  }
   if (rel_zero_btn) lv_obj_add_flag(rel_zero_btn, LV_OBJ_FLAG_HIDDEN);
 }
 
