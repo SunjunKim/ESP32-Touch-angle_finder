@@ -1,6 +1,8 @@
 #include "abs_page.h"
 
+#include "imu_math.h"
 #include <Arduino.h>
+#include <climits>
 #include <cstring>
 #include <cstdio>
 #include <math.h>
@@ -91,6 +93,13 @@ void abs_update(lv_obj_t *primary,
   set_label_if_changed(primary, s_last_line1, sizeof(s_last_line1), line1);
   set_label_if_changed(secondary, s_last_line2, sizeof(s_last_line2), line2);
   update_inclinometer(incl_container, incl_bubble, imu.pitch_deg, imu.roll_deg);
+}
+
+void abs_accel_to_pitch_roll(float ax, float ay, float az, float *pitch_deg, float *roll_deg)
+{
+  if (!pitch_deg || !roll_deg) return;
+  *pitch_deg = imu_math::rad2deg(atan2f(ax, sqrtf(ay * ay + az * az)));
+  *roll_deg = imu_math::rad2deg(atan2f(ay, sqrtf(ax * ax + az * az)));
 }
 
 } // namespace ui_pages

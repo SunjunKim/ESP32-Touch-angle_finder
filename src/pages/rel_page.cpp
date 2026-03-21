@@ -1,9 +1,16 @@
+#include <Arduino.h>
+
 #include "rel_page.h"
 
-#include <Arduino.h>
+#include "app_hooks.h"
+#include "imu_math.h"
+#include "imu_state.h"
+#include "pin_config.h"
 #include <cstring>
 #include <cstdio>
 #include <math.h>
+
+LV_FONT_DECLARE(lv_font_roboto_mono_48);
 
 namespace ui_pages {
 namespace {
@@ -27,6 +34,78 @@ static void set_label_if_changed(lv_obj_t *label, char *cache, size_t cache_len,
 }
 
 } // namespace
+
+const lv_font_t *rel_angle_font()
+{
+  return &lv_font_roboto_mono_48;
+}
+
+lv_obj_t *rel_create_angle_label(lv_obj_t *parent)
+{
+  lv_obj_t *lbl = lv_label_create(parent);
+  lv_obj_set_style_text_font(lbl, rel_angle_font(), 0);
+  lv_obj_set_style_text_color(lbl, lv_color_white(), 0);
+  lv_obj_align(lbl, LV_ALIGN_CENTER, 0, -20);
+  lv_label_set_text(lbl, "");
+  lv_obj_add_flag(lbl, LV_OBJ_FLAG_HIDDEN);
+  return lbl;
+}
+
+lv_obj_t *rel_create_zero_button(lv_obj_t *parent, lv_event_cb_t on_click)
+{
+  lv_obj_t *btn = lv_btn_create(parent);
+  lv_obj_set_size(btn, LCD_WIDTH, LCD_HEIGHT / 3);
+  lv_obj_align(btn, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(btn, lv_palette_main(LV_PALETTE_ORANGE), 0);
+  lv_obj_set_style_radius(btn, 0, 0);
+  lv_obj_set_style_border_width(btn, 0, 0);
+  lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
+  if (on_click) {
+    lv_obj_add_event_cb(btn, on_click, LV_EVENT_CLICKED, nullptr);
+  }
+
+  lv_obj_t *btn_label = lv_label_create(btn);
+  lv_obj_set_style_text_font(btn_label, &lv_font_montserrat_20, 0);
+  lv_obj_set_style_text_color(btn_label, lv_color_white(), 0);
+  lv_label_set_text(btn_label, "Tap to set zero");
+  lv_obj_center(btn_label);
+  return btn;
+}
+
+void rel_capture_reference_now()
+{
+  portENTER_CRITICAL(&g_imuMux);
+  g_imu.ref_ax_g = g_imu.ax_g;
+  g_imu.ref_ay_g = g_imu.ay_g;
+  g_imu.ref_az_g = g_imu.az_g;
+  g_imu.ref_valid =
+      (imu_math::safe_norm3(g_imu.ref_ax_g, g_imu.ref_ay_g, g_imu.ref_az_g) > 0.0f);
+  portEXIT_CRITICAL(&g_imuMux);
+}
+
+void rel_update_angle_sample(float ax, float ay, float az)
+{
+  portENTER_CRITICAL(&g_imuMux);
+  if (g_imu.ref_valid) {
+    const float nCur = imu_math::safe_norm3(ax, ay, az);
+    const float nRef = imu_math::safe_norm3(g_imu.ref_ax_g, g_imu.ref_ay_g, g_imu.ref_az_g);
+    if (nCur > 0.0f && nRef > 0.0f) {
+      float c = (ax * g_imu.ref_ax_g + ay * g_imu.ref_ay_g + az * g_imu.ref_az_g) / (nCur * nRef);
+      c = imu_math::clampf(c, -1.0f, 1.0f);
+      g_imu.rel_angle_deg = imu_math::rad2deg(acosf(c));
+    }
+  } else {
+    g_imu.rel_angle_deg = 0.0f;
+  }
+  portEXIT_CRITICAL(&g_imuMux);
+}
+
+void rel_on_tap_zero()
+{
+  rel_capture_reference_now();
+  app_play_rel_zero_sound();
+}
 
 void rel_show(lv_obj_t *incl_container,
               lv_obj_t *rel_angle_big,

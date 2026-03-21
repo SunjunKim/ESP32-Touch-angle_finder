@@ -17,5 +17,7 @@ void abs_update(lv_obj_t *primary,
                 lv_obj_t *incl_bubble,
                 const ImuUiData &imu);
 
+void abs_accel_to_pitch_roll(float ax, float ay, float az, float *pitch_deg, float *roll_deg);
+
 } // namespace ui_pages
 

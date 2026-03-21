@@ -5,6 +5,15 @@
 
 namespace ui_pages {
 
+const lv_font_t *rel_angle_font();
+
+lv_obj_t *rel_create_angle_label(lv_obj_t *parent);
+lv_obj_t *rel_create_zero_button(lv_obj_t *parent, lv_event_cb_t on_click);
+
+void rel_capture_reference_now();
+void rel_update_angle_sample(float ax, float ay, float az);
+void rel_on_tap_zero();
+
 void rel_show(lv_obj_t *incl_container,
               lv_obj_t *rel_angle_big,
               lv_obj_t *primary,

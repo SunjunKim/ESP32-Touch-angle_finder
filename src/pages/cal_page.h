@@ -23,4 +23,18 @@ void cal_update(lv_obj_t *primary,
                 lv_obj_t *debug,
                 const CalUiData &cal);
 
+// ---- Accel calibration (prefs + 6-face wizard, IMU task / loop integration) ----
+bool cal_load_accel_prefs();
+void cal_apply_accel(float &ax, float &ay, float &az);
+bool cal_accel_cal_valid();
+
+void cal_wizard_reset();
+void cal_wizard_imu_sample(float ax, float ay, float az);
+void cal_flush_pending_beep();
+void cal_poll_delayed_beep();
+CalUiData cal_ui_for_refresh();
+
+void cal_intro_tap_event(lv_event_t *e);
+lv_obj_t *cal_create_intro_tap_layer(lv_obj_t *parent);
+
 } // namespace ui_pages

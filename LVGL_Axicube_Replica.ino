@@ -12,11 +12,7 @@
 
 // Full definition must appear before any function that uses AppMode::Calibrate
 // (e.g. power_sleep_manager). A forward declaration alone hides enumerators.
-enum class AppMode : uint8_t {
-  RelAngle = 0,
-  AbsAngle = 1,
-  Calibrate = 2,
-};
+#include "src/pages/app_mode.h"
 
 #include <Arduino.h>
 #include <lvgl.h>
@@ -33,7 +29,6 @@ enum class AppMode : uint8_t {
 #include "lv_conf.h"
 
 #include "SensorQMI8658.hpp"
-#include <Preferences.h>
 #include "HWCDC.h"
 #include "WiFi.h"
 
@@ -41,8 +36,9 @@ enum class AppMode : uint8_t {
 #include "src/pages/rel_page.h"
 #include "src/pages/cal_page.h"
 #include "src/pages/page_types.h"
-
-LV_FONT_DECLARE(lv_font_roboto_mono_48);
+#include "src/pages/app_hooks.h"
+#include "src/pages/imu_math.h"
+#include "src/pages/imu_state.h"
 
 HWCDC USBSerial;
 
@@ -71,8 +67,6 @@ static inline void beep_poll()
   g_beepActive = false;
   noTone(beePin);
 }
-
-
 
 static inline void play_welcome_sound()
 {
@@ -113,6 +107,15 @@ static constexpr uint32_t kPwrDebounceMs = 50;
 static constexpr uint32_t kPwrIgnoreAfterBootMs = 3'000;
 static constexpr uint32_t kPwrReleaseWaitTimeoutMs = 5'000;
 static constexpr uint32_t kPwrIgnoreAfterWakeMs = 1'500;
+
+// Below this smoothed cell voltage, force the same power-off path as manual sleep
+// (SYS_EN low + light sleep fallback).
+static constexpr float kBattForceSleepBelowV = 3.5f;
+static constexpr uint32_t kBattForceSleepConfirmMs = 2'000;
+
+// Battery state (updated in battery_poll_and_update). Defined here so power_sleep_manager() sees it.
+static float g_battVoltage = NAN;
+static uint8_t g_battPct = 0;
 
 static constexpr uint8_t kBacklightFull = 255; // 0..255
 static constexpr uint8_t kBacklightDim  = 25;  // tweak to taste (lower = darker, less power)
@@ -261,6 +264,21 @@ static void enter_poweroff_sleep(const char *reason, const bool wait_for_pwr_rel
 static void power_sleep_manager()
 {
   const uint32_t now = millis();
+
+  // ---- Critical battery: force sleep below threshold ----
+  // Runs before boot/wake grace so a depleted pack is not kept awake by those delays.
+  static uint32_t s_lowBattSinceMs = 0;
+  if (isfinite(g_battVoltage) && g_battVoltage < kBattForceSleepBelowV) {
+    if (s_lowBattSinceMs == 0) {
+      s_lowBattSinceMs = now;
+    } else if ((now - s_lowBattSinceMs) >= kBattForceSleepConfirmMs) {
+      s_lowBattSinceMs = 0;
+      enter_poweroff_sleep("low battery", /*wait_for_pwr_release=*/false);
+    }
+  } else {
+    s_lowBattSinceMs = 0;
+  }
+
   if (now - g_bootMs < kPwrIgnoreAfterBootMs) return; // don't sleep during boot/setup
   if (g_wakeMs != 0 && (now - g_wakeMs) < kPwrIgnoreAfterWakeMs) return; // don't sleep right after wake
 
@@ -353,12 +371,31 @@ static inline AppMode next_mode(AppMode m)
   return (AppMode)(((uint8_t)m + 1u) % kAppModeCount);
 }
 
-static AppMode app_mode_snapshot()
+AppMode app_mode_snapshot()
 {
   portENTER_CRITICAL(&g_appModeMux);
   const AppMode m = g_mode;
   portEXIT_CRITICAL(&g_appModeMux);
   return m;
+}
+
+void app_mark_user_activity()
+{
+  mark_user_activity();
+}
+
+void app_start_tone(uint16_t hz, uint32_t durationMs)
+{
+  start_beep(hz, durationMs);
+}
+
+void app_play_rel_zero_sound()
+{
+  tone(beePin, 330);
+  delay(45);
+  tone(beePin, 440);
+  delay(45);
+  noTone(beePin);
 }
 
 // ---- Mode button (short-press to switch ABS/REL) ----
@@ -470,9 +507,6 @@ static constexpr float kVRef = 3.3f;
 static constexpr float kR1 = 143000.0f;
 static constexpr float kR2 = 65000.0f;
 
-static float g_battVoltage = NAN;
-static uint8_t g_battPct = 0;
-
 // ---- IMU / angle state ----
 static SensorQMI8658 qmi;
 static SemaphoreHandle_t g_imuIntSem = nullptr;
@@ -488,404 +522,8 @@ static void IRAM_ATTR imu_int_isr()
   }
 }
 
-struct ImuState {
-  float ax_g = 0.0f;
-  float ay_g = 0.0f;
-  float az_g = 0.0f;
-
-  float pitch_deg = 0.0f;
-  float roll_deg = 0.0f;
-
-  // REL mode: reference plane normal captured at "zero" time
-  float ref_ax_g = 0.0f;
-  float ref_ay_g = 0.0f;
-  float ref_az_g = 0.0f;
-  bool ref_valid = false;
-
-  // REL mode: angle between current normal and reference normal (degrees)
-  float rel_angle_deg = 0.0f;
-
-  bool inited = false;
-};
-
-static ImuState g_imu;
-static portMUX_TYPE g_imuMux = portMUX_INITIALIZER_UNLOCKED;
-
-// ---- Accel calibration (6-face, bias + diagonal scale) ----
-static constexpr char kAccCalPrefsNs[] = "imu_acc6";
-static float g_accBias[3] = {0.0f, 0.0f, 0.0f};
-static float g_accScale[3] = {1.0f, 1.0f, 1.0f};
-static bool g_accCalValid = false;
-
-static inline void imu_apply_accel_cal(float &ax, float &ay, float &az)
-{
-  if (!g_accCalValid) return;
-  ax = g_accScale[0] * (ax - g_accBias[0]);
-  ay = g_accScale[1] * (ay - g_accBias[1]);
-  az = g_accScale[2] * (az - g_accBias[2]);
-}
-
-static bool imu_load_accel_cal_prefs()
-{
-  Preferences p;
-  if (!p.begin(kAccCalPrefsNs, true)) {
-    return false;
-  }
-  const bool ok = p.getBool("ok", false);
-  if (!ok) {
-    p.end();
-    return false;
-  }
-  g_accBias[0] = p.getFloat("bx", 0.0f);
-  g_accBias[1] = p.getFloat("by", 0.0f);
-  g_accBias[2] = p.getFloat("bz", 0.0f);
-  g_accScale[0] = p.getFloat("sx", 1.0f);
-  g_accScale[1] = p.getFloat("sy", 1.0f);
-  g_accScale[2] = p.getFloat("sz", 1.0f);
-  p.end();
-  g_accCalValid = true;
-  return true;
-}
-
-static void imu_save_accel_cal_prefs()
-{
-  Preferences p;
-  if (!p.begin(kAccCalPrefsNs, false)) {
-    return;
-  }
-  p.putBool("ok", true);
-  p.putFloat("bx", g_accBias[0]);
-  p.putFloat("by", g_accBias[1]);
-  p.putFloat("bz", g_accBias[2]);
-  p.putFloat("sx", g_accScale[0]);
-  p.putFloat("sy", g_accScale[1]);
-  p.putFloat("sz", g_accScale[2]);
-  p.end();
-}
-
-static bool imu_compute_accel_cal_from_6face(const float s[6][3])
-{
-  // X from TOP/BOTTOM s[2],s[3]; Y from LEFT/RIGHT s[4],s[5] (see kCalExpected order).
-  const float dx = s[2][0] - s[3][0];
-  const float dy = s[4][1] - s[5][1];
-  const float dz = s[0][2] - s[1][2];
-  if (fabsf(dx) < 0.12f || fabsf(dy) < 0.12f || fabsf(dz) < 0.12f) {
-    return false;
-  }
-  g_accBias[0] = (s[2][0] + s[3][0]) * 0.5f;
-  g_accBias[1] = (s[4][1] + s[5][1]) * 0.5f;
-  g_accBias[2] = (s[0][2] + s[1][2]) * 0.5f;
-  g_accScale[0] = 2.0f / dx;
-  g_accScale[1] = 2.0f / dy;
-  g_accScale[2] = 2.0f / dz;
-  if (!isfinite(g_accScale[0]) || !isfinite(g_accScale[1]) || !isfinite(g_accScale[2])) {
-    return false;
-  }
-  g_accCalValid = true;
-  imu_save_accel_cal_prefs();
-  return true;
-}
-
-// ---- CAL wizard (auto still + orientation); state mostly updated from imu_task ----
-static constexpr uint8_t kCalSteps = 6;
-// Sensor frame on this board: LCD-up rest gives ~−1 g on Z (QMI8658 +Z out of package vs PCB mount).
-// Steps 2–3: TOP/BOTTOM short edges → ±X; steps 4–5: LEFT/RIGHT long edges → ±Y (matches this PCB mount).
-static const float kCalExpected[kCalSteps][3] = {
-  {0.0f, 0.0f, -1.0f},
-  {0.0f, 0.0f, 1.0f},
-  {-1.0f, 0.0f, 0.0f},
-  {1.0f, 0.0f, 0.0f},
-  {0.0f, 1.0f, 0.0f},
-  {0.0f, -1.0f, 0.0f},
-};
-static float g_calSamples[kCalSteps][3];
-static uint8_t g_calStep = 0; // 0..5 capture; 6 = finished (UI done)
-static uint32_t g_calStillStartMs = 0;
-static float g_calSumAx = 0.0f, g_calSumAy = 0.0f, g_calSumAz = 0.0f;
-static uint32_t g_calSumCount = 0;
-static float g_calLastRaw[3] = {0.0f, 0.0f, 0.0f};
-static bool g_calPrevValid = false;
-static uint8_t g_calBadStreak = 0; // consecutive “not stable” before discarding hold
-static volatile bool g_calAwaitingTapToStart = true;
-
-// Pre-cal magnitude can be off; noise at 250Hz breaks a tight |Δa| test and resets the hold forever.
-static constexpr float kCalMagMinG = 0.86f;
-static constexpr float kCalMagMaxG = 1.14f;
-static constexpr float kCalDotMin = 0.90f;
-static constexpr float kCalJitterMaxG = 0.14f;
-static constexpr uint32_t kCalHoldMs = 650;
-static constexpr uint32_t kCalMinStableSamples = 40;
-static constexpr uint8_t kCalBadStreakToReset = 8;
-static CalUiData g_calUi;
-static portMUX_TYPE g_calUiMux = portMUX_INITIALIZER_UNLOCKED;
-static portMUX_TYPE g_calToneMux = portMUX_INITIALIZER_UNLOCKED;
-static uint16_t g_calPendingBeepHz = 0;
-static uint32_t g_calPendingBeepMs = 0;
-
-// Second tone after each captured face (not after final save beep).
-static constexpr uint32_t kCalSecondBeepAfterMs = 200;
-static constexpr uint16_t kCalSecondBeepHz = 660;
-static constexpr uint32_t kCalSecondBeepMs = 55;
-static uint32_t g_calDelayedBeepAtMs = 0;
-static uint16_t g_calDelayedBeepHz = 0;
-static uint32_t g_calDelayedBeepDurMs = 0;
-
-static void cal_request_beep(uint16_t hz, uint32_t ms)
-{
-  portENTER_CRITICAL(&g_calToneMux);
-  g_calPendingBeepHz = hz;
-  g_calPendingBeepMs = ms;
-  portEXIT_CRITICAL(&g_calToneMux);
-}
-
-static void cal_schedule_delayed_beep(uint32_t delayMs, uint16_t hz, uint32_t durMs)
-{
-  portENTER_CRITICAL(&g_calToneMux);
-  g_calDelayedBeepAtMs = millis() + delayMs;
-  g_calDelayedBeepHz = hz;
-  g_calDelayedBeepDurMs = durMs;
-  portEXIT_CRITICAL(&g_calToneMux);
-}
-
-static void cal_cancel_delayed_beep()
-{
-  portENTER_CRITICAL(&g_calToneMux);
-  g_calDelayedBeepAtMs = 0;
-  g_calDelayedBeepHz = 0;
-  g_calDelayedBeepDurMs = 0;
-  portEXIT_CRITICAL(&g_calToneMux);
-}
-
-static void cal_flush_pending_beep()
-{
-  uint16_t hz = 0;
-  uint32_t ms = 0;
-  portENTER_CRITICAL(&g_calToneMux);
-  hz = g_calPendingBeepHz;
-  ms = g_calPendingBeepMs;
-  g_calPendingBeepHz = 0;
-  g_calPendingBeepMs = 0;
-  portEXIT_CRITICAL(&g_calToneMux);
-  if (hz > 0 && ms > 0) {
-    start_beep(hz, ms);
-  }
-}
-
-// Call from loop() after beep_poll() so the first cal tone can finish before this fires.
-static void cal_poll_delayed_beep()
-{
-  uint32_t when = 0;
-  uint16_t hz = 0;
-  uint32_t dur = 0;
-  portENTER_CRITICAL(&g_calToneMux);
-  when = g_calDelayedBeepAtMs;
-  hz = g_calDelayedBeepHz;
-  dur = g_calDelayedBeepDurMs;
-  if (when != 0 && hz > 0 && dur > 0 && (int32_t)(millis() - when) >= 0) {
-    g_calDelayedBeepAtMs = 0;
-    g_calDelayedBeepHz = 0;
-    g_calDelayedBeepDurMs = 0;
-    portEXIT_CRITICAL(&g_calToneMux);
-    start_beep(hz, dur);
-    return;
-  }
-  portEXIT_CRITICAL(&g_calToneMux);
-}
-
-static void cal_wizard_reset()
-{
-  cal_cancel_delayed_beep();
-  ui_pages::cal_invalidate_label_caches();
-  g_calAwaitingTapToStart = true;
-  g_calStep = 0;
-  g_calStillStartMs = 0;
-  g_calSumAx = g_calSumAy = g_calSumAz = 0.0f;
-  g_calSumCount = 0;
-  g_calPrevValid = false;
-  g_calBadStreak = 0;
-  portENTER_CRITICAL(&g_calUiMux);
-  g_calUi = CalUiData{};
-  portEXIT_CRITICAL(&g_calUiMux);
-}
-
-static void cal_imu_process_sample(float ax, float ay, float az)
-{
-  if (g_calStep >= kCalSteps) {
-    return;
-  }
-
-  if (g_calAwaitingTapToStart) {
-    const float *const e = kCalExpected[0];
-    const float n2 = ax * ax + ay * ay + az * az;
-    const float nm = sqrtf(n2);
-    float dot = 0.0f;
-    bool magOk = false;
-    bool orientOk = false;
-    bool jitterOk = true;
-
-    if (nm > 1e-4f) {
-      const float inv = 1.0f / nm;
-      const float nx = ax * inv;
-      const float ny = ay * inv;
-      const float nz = az * inv;
-      dot = nx * e[0] + ny * e[1] + nz * e[2];
-      magOk = (nm > kCalMagMinG && nm < kCalMagMaxG);
-      orientOk = (dot > kCalDotMin);
-    }
-
-    if (g_calPrevValid) {
-      const float dx = ax - g_calLastRaw[0];
-      const float dy = ay - g_calLastRaw[1];
-      const float dz = az - g_calLastRaw[2];
-      const float d = sqrtf(dx * dx + dy * dy + dz * dz);
-      if (d >= kCalJitterMaxG) {
-        jitterOk = false;
-      }
-    }
-    g_calLastRaw[0] = ax;
-    g_calLastRaw[1] = ay;
-    g_calLastRaw[2] = az;
-    g_calPrevValid = true;
-
-    const bool stable = magOk && orientOk && jitterOk;
-
-    portENTER_CRITICAL(&g_calUiMux);
-    g_calUi.align_dot = dot;
-    g_calUi.step = 0;
-    g_calUi.stable = stable;
-    portEXIT_CRITICAL(&g_calUiMux);
-    return;
-  }
-
-  const float *const e = kCalExpected[g_calStep];
-  const float n2 = ax * ax + ay * ay + az * az;
-  const float nm = sqrtf(n2);
-  float dot = 0.0f;
-  bool magOk = false;
-  bool orientOk = false;
-  bool jitterOk = true;
-
-  if (nm > 1e-4f) {
-    const float inv = 1.0f / nm;
-    const float nx = ax * inv;
-    const float ny = ay * inv;
-    const float nz = az * inv;
-    dot = nx * e[0] + ny * e[1] + nz * e[2];
-    magOk = (nm > kCalMagMinG && nm < kCalMagMaxG);
-    orientOk = (dot > kCalDotMin);
-  }
-
-  if (g_calPrevValid) {
-    const float dx = ax - g_calLastRaw[0];
-    const float dy = ay - g_calLastRaw[1];
-    const float dz = az - g_calLastRaw[2];
-    const float d = sqrtf(dx * dx + dy * dy + dz * dz);
-    if (d >= kCalJitterMaxG) {
-      jitterOk = false;
-    }
-  }
-  g_calLastRaw[0] = ax;
-  g_calLastRaw[1] = ay;
-  g_calLastRaw[2] = az;
-  g_calPrevValid = true;
-
-  const bool stable = magOk && orientOk && jitterOk;
-  const uint32_t now = millis();
-
-  portENTER_CRITICAL(&g_calUiMux);
-  g_calUi.step = (g_calStep < kCalSteps) ? g_calStep : kCalSteps;
-  g_calUi.total = kCalSteps;
-  g_calUi.align_dot = dot;
-  g_calUi.stable = stable;
-  portEXIT_CRITICAL(&g_calUiMux);
-
-  if (stable) {
-    g_calBadStreak = 0;
-    if (g_calStillStartMs == 0) {
-      g_calStillStartMs = now;
-    }
-    g_calSumAx += ax;
-    g_calSumAy += ay;
-    g_calSumAz += az;
-    g_calSumCount++;
-
-    const uint32_t held = now - g_calStillStartMs;
-    if (held >= kCalHoldMs && g_calSumCount >= kCalMinStableSamples) {
-      g_calSamples[g_calStep][0] = g_calSumAx / (float)g_calSumCount;
-      g_calSamples[g_calStep][1] = g_calSumAy / (float)g_calSumCount;
-      g_calSamples[g_calStep][2] = g_calSumAz / (float)g_calSumCount;
-      g_calStep++;
-      g_calStillStartMs = 0;
-      g_calSumAx = g_calSumAy = g_calSumAz = 0.0f;
-      g_calSumCount = 0;
-      g_calPrevValid = false;
-
-      if (g_calStep < kCalSteps) {
-        cal_request_beep(880, 85);
-        cal_schedule_delayed_beep(kCalSecondBeepAfterMs, kCalSecondBeepHz, kCalSecondBeepMs);
-      } else {
-        cal_cancel_delayed_beep();
-        const bool ok = imu_compute_accel_cal_from_6face(g_calSamples);
-        portENTER_CRITICAL(&g_calUiMux);
-        g_calUi.done_saved = ok;
-        g_calUi.save_failed = !ok;
-        g_calUi.step = kCalSteps;
-        g_calUi.stable = false;
-        portEXIT_CRITICAL(&g_calUiMux);
-        cal_request_beep(ok ? 1000 : 220, ok ? 140 : 300);
-      }
-    }
-  } else {
-    g_calBadStreak++;
-    if (g_calBadStreak >= kCalBadStreakToReset) {
-      g_calStillStartMs = 0;
-      g_calSumAx = g_calSumAy = g_calSumAz = 0.0f;
-      g_calSumCount = 0;
-      g_calBadStreak = 0;
-    }
-  }
-}
-
-static inline float clampf(float v, float lo, float hi)
-{
-  if (v < lo) return lo;
-  if (v > hi) return hi;
-  return v;
-}
-
-static inline float rad2deg(float r) { return r * 57.29577951308232f; }
-
-static inline float round_to_step(float v, float step)
-{
-  if (!(step > 0.0f) || !isfinite(v)) return v;
-  return roundf(v / step) * step;
-}
-
-static inline float safe_norm3(float x, float y, float z)
-{
-  const float n2 = x * x + y * y + z * z;
-  if (n2 <= 1e-12f) return 0.0f;
-  return sqrtf(n2);
-}
-
-static inline void normalize3(float &x, float &y, float &z)
-{
-  const float n = safe_norm3(x, y, z);
-  if (n <= 0.0f) return;
-  x /= n;
-  y /= n;
-  z /= n;
-}
-
-static void imu_set_reference_normal_now()
-{
-  portENTER_CRITICAL(&g_imuMux);
-  g_imu.ref_ax_g = g_imu.ax_g;
-  g_imu.ref_ay_g = g_imu.ay_g;
-  g_imu.ref_az_g = g_imu.az_g;
-  g_imu.ref_valid = (safe_norm3(g_imu.ref_ax_g, g_imu.ref_ay_g, g_imu.ref_az_g) > 0.0f);
-  portEXIT_CRITICAL(&g_imuMux);
-}
+ImuState g_imu;
+portMUX_TYPE g_imuMux = portMUX_INITIALIZER_UNLOCKED;
 
 static void imu_task(void * /*param*/)
 {
@@ -951,15 +589,16 @@ static void imu_task(void * /*param*/)
 
     const AppMode modeSnap = app_mode_snapshot();
     if (modeSnap == AppMode::Calibrate) {
-      cal_imu_process_sample(ax, ay, az);
+      ui_pages::cal_wizard_imu_sample(ax, ay, az);
       mark_user_activity();
-    } else if (g_accCalValid) {
-      imu_apply_accel_cal(ax, ay, az);
+    } else if (ui_pages::cal_accel_cal_valid()) {
+      ui_pages::cal_apply_accel(ax, ay, az);
     }
 
     // Accelerometer vector (raw during CAL wizard; calibrated otherwise).
-    const float pitch = rad2deg(atan2f(ax, sqrtf(ay * ay + az * az)));
-    const float roll  = rad2deg(atan2f(ay, sqrtf(ax * ax + az * az)));
+    float pitch = 0.0f;
+    float roll = 0.0f;
+    ui_pages::abs_accel_to_pitch_roll(ax, ay, az, &pitch, &roll);
 
     if (!prev_valid) {
       prev_ax = ax;
@@ -968,7 +607,7 @@ static void imu_task(void * /*param*/)
       prev_valid = true;
       mark_motion_activity();
     } else {
-      const float delta = safe_norm3(ax - prev_ax, ay - prev_ay, az - prev_az);
+      const float delta = imu_math::safe_norm3(ax - prev_ax, ay - prev_ay, az - prev_az);
       if (delta >= kMotionDeltaG) {
         mark_motion_activity();
       }
@@ -978,28 +617,14 @@ static void imu_task(void * /*param*/)
     }
 
     portENTER_CRITICAL(&g_imuMux);
-    // Expose raw accelerometer readings from the chip.
     g_imu.ax_g = ax;
     g_imu.ay_g = ay;
     g_imu.az_g = az;
-
     g_imu.pitch_deg = pitch;
     g_imu.roll_deg = roll;
-
-    // REL mode: angle between current accel normal and reference normal.
-    // This is an unsigned angle in [0..180], typically [0..90] for inclinometer use.
-    if (g_imu.ref_valid) {
-      const float nCur = safe_norm3(ax, ay, az);
-      const float nRef = safe_norm3(g_imu.ref_ax_g, g_imu.ref_ay_g, g_imu.ref_az_g);
-      if (nCur > 0.0f && nRef > 0.0f) {
-        float c = (ax * g_imu.ref_ax_g + ay * g_imu.ref_ay_g + az * g_imu.ref_az_g) / (nCur * nRef);
-        c = clampf(c, -1.0f, 1.0f);
-        g_imu.rel_angle_deg = rad2deg(acosf(c));
-      }
-    } else {
-      g_imu.rel_angle_deg = 0.0f;
-    }
     portEXIT_CRITICAL(&g_imuMux);
+
+    ui_pages::rel_update_angle_sample(ax, ay, az);
   }
 }
 
@@ -1027,11 +652,6 @@ static uint8_t ui_last_bg_kind = 255; // 0=black, 1=rel-warn, 2=cal
 
 static void ui_set_mode_label(AppMode mode);
 
-static const lv_font_t *ui_rel_angle_font()
-{
-  return &lv_font_roboto_mono_48;
-}
-
 static void ui_update_background(bool relRefValid)
 {
   uint8_t kind = 0;
@@ -1055,15 +675,9 @@ static void ui_update_background(bool relRefValid)
 
 static void do_calibration_action()
 {
-  // Tap to calibrate/zero depending on current mode.
   switch (g_mode) {
     case AppMode::RelAngle:
-      imu_set_reference_normal_now();
-      tone(beePin, 330); // mi
-      delay(45);
-      tone(beePin, 440); // ra
-      delay(45);
-      noTone(beePin);
+      ui_pages::rel_on_tap_zero();
       break;
     case AppMode::AbsAngle:
     case AppMode::Calibrate:
@@ -1122,7 +736,7 @@ static void battery_poll_and_update()
     // Outline size: 34x14 with 1px border, cap 3x8
     const int innerW = 34 - 2;
     const int fillW = (int)lroundf((innerW - 2) * (g_battPct / 100.0f)); // keep a small right padding
-    const int clamped = (int)clampf((float)fillW, 0.0f, (float)(innerW - 2));
+    const int clamped = (int)imu_math::clampf((float)fillW, 0.0f, (float)(innerW - 2));
     lv_obj_set_width(ui_batt_fill, clamped);
 
     const int8_t battColorState = low ? 1 : (full ? 2 : 0);
@@ -1167,7 +781,7 @@ static void ui_refresh()
 
   if (ui_last_mode != mode) {
     if (mode == AppMode::Calibrate && prev_mode != AppMode::Calibrate) {
-      cal_wizard_reset();
+      ui_pages::cal_wizard_reset();
     }
     ui_last_mode = mode;
     ui_set_mode_label(mode);
@@ -1199,11 +813,7 @@ static void ui_refresh()
       ui_pages::rel_update(ui_rel_angle_big, ui_debug, ui_imu);
       break;
     case AppMode::Calibrate: {
-      CalUiData cu;
-      portENTER_CRITICAL(&g_calUiMux);
-      cu = g_calUi;
-      portEXIT_CRITICAL(&g_calUiMux);
-      cu.awaiting_tap = g_calAwaitingTapToStart && !cu.done_saved && !cu.save_failed;
+      const CalUiData cu = ui_pages::cal_ui_for_refresh();
       ui_pages::cal_show(ui_incl_container, ui_rel_angle_big, ui_primary, ui_secondary, ui_debug, ui_rel_zero_btn);
       ui_pages::cal_update(ui_primary, ui_secondary, ui_debug, cu);
       if (ui_cal_tap_layer != nullptr) {
@@ -1222,25 +832,6 @@ static void ui_refresh()
 static void ui_timer_cb(lv_timer_t * /*t*/)
 {
   ui_refresh();
-}
-
-static void cal_intro_tap_cb(lv_event_t *e)
-{
-  if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
-    return;
-  }
-  if (!g_calAwaitingTapToStart) {
-    return;
-  }
-  if (app_mode_snapshot() != AppMode::Calibrate) {
-    return;
-  }
-  g_calAwaitingTapToStart = false;
-  mark_user_activity();
-  start_beep(523, 50);
-  if (ui_cal_tap_layer != nullptr) {
-    lv_obj_add_flag(ui_cal_tap_layer, LV_OBJ_FLAG_HIDDEN);
-  }
 }
 
 static void ui_build()
@@ -1318,13 +909,7 @@ static void ui_build()
   lv_obj_set_style_bg_color(ui_incl_bubble, lv_palette_main(LV_PALETTE_GREEN), 0);
   lv_obj_set_pos(ui_incl_bubble, 50 - bubble_r, 50 - bubble_r);
 
-  // REL mode: big angle readout in place of inclinometer (same position).
-  ui_rel_angle_big = lv_label_create(lv_scr_act());
-  lv_obj_set_style_text_font(ui_rel_angle_big, ui_rel_angle_font(), 0);
-  lv_obj_set_style_text_color(ui_rel_angle_big, lv_color_white(), 0);
-  lv_obj_align(ui_rel_angle_big, LV_ALIGN_CENTER, 0, -20);
-  lv_label_set_text(ui_rel_angle_big, "");
-  lv_obj_add_flag(ui_rel_angle_big, LV_OBJ_FLAG_HIDDEN);
+  ui_rel_angle_big = ui_pages::rel_create_angle_label(lv_scr_act());
 
   // Text readouts
   ui_primary = lv_label_create(lv_scr_act());
@@ -1342,32 +927,8 @@ static void ui_build()
   lv_obj_align(ui_debug, LV_ALIGN_BOTTOM_MID, 0, -8);
   lv_label_set_text(ui_debug, "");
 
-  // REL mode: bottom-half "Tap to set zero" button (orange)
-  ui_rel_zero_btn = lv_btn_create(lv_scr_act());
-  lv_obj_set_size(ui_rel_zero_btn, LCD_WIDTH, LCD_HEIGHT / 3);
-  lv_obj_align(ui_rel_zero_btn, LV_ALIGN_BOTTOM_MID, 0, 0);
-  lv_obj_set_style_bg_opa(ui_rel_zero_btn, LV_OPA_COVER, 0);
-  lv_obj_set_style_bg_color(ui_rel_zero_btn, lv_palette_main(LV_PALETTE_ORANGE), 0);
-  lv_obj_set_style_radius(ui_rel_zero_btn, 0, 0);
-  lv_obj_set_style_border_width(ui_rel_zero_btn, 0, 0);
-  lv_obj_clear_flag(ui_rel_zero_btn, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_add_event_cb(ui_rel_zero_btn, ui_tap_cb, LV_EVENT_CLICKED, nullptr);
-
-  lv_obj_t *btn_label = lv_label_create(ui_rel_zero_btn);
-  lv_obj_set_style_text_font(btn_label, &lv_font_montserrat_20, 0);
-  lv_obj_set_style_text_color(btn_label, lv_color_white(), 0);
-  lv_label_set_text(btn_label, "Tap to set zero");
-  lv_obj_center(btn_label);
-
-  // CAL intro: full-screen invisible tap target (above widgets when shown).
-  ui_cal_tap_layer = lv_btn_create(lv_scr_act());
-  lv_obj_set_size(ui_cal_tap_layer, LCD_WIDTH, LCD_HEIGHT);
-  lv_obj_align(ui_cal_tap_layer, LV_ALIGN_TOP_LEFT, 0, 0);
-  lv_obj_set_style_bg_opa(ui_cal_tap_layer, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_border_width(ui_cal_tap_layer, 0, 0);
-  lv_obj_clear_flag(ui_cal_tap_layer, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_add_event_cb(ui_cal_tap_layer, cal_intro_tap_cb, LV_EVENT_CLICKED, nullptr);
-  lv_obj_add_flag(ui_cal_tap_layer, LV_OBJ_FLAG_HIDDEN);
+  ui_rel_zero_btn = ui_pages::rel_create_zero_button(lv_scr_act(), ui_tap_cb);
+  ui_cal_tap_layer = ui_pages::cal_create_intro_tap_layer(lv_scr_act());
 
   // Reflect initial mode immediately (ui_refresh will keep it updated).
   if (g_mode == AppMode::AbsAngle || g_mode == AppMode::Calibrate) {
@@ -1422,7 +983,7 @@ static void setup_hardware()
   );
   USBSerial.println("CST816T initialization success");
 
-  (void)imu_load_accel_cal_prefs();
+  (void)ui_pages::cal_load_accel_prefs();
 }
 
 static void setup_lvgl()
@@ -1490,9 +1051,9 @@ void setup()
 
 void loop()
 {
-  cal_flush_pending_beep();
+  ui_pages::cal_flush_pending_beep();
   beep_poll();
-  cal_poll_delayed_beep();
+  ui_pages::cal_poll_delayed_beep();
   beep_poll();
   mode_button_poll();
 
