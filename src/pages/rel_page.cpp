@@ -18,6 +18,9 @@ namespace {
 static char s_last_rel_big[64] = {0};
 static char s_last_dbg[96] = {0};
 
+// Idle noise on Ax/Ay slightly inflates sqrt(Ax²+Ay²); squash sub-threshold jitter.
+static constexpr float kHorizonTiltDeadbandDeg = 0.35f;
+
 static inline float round_to_step(float v, float step)
 {
   if (!(step > 0.0f) || !isfinite(v)) return v;
@@ -96,7 +99,20 @@ void rel_update_angle_sample(float ax, float ay, float az)
       g_imu.rel_angle_deg = imu_math::rad2deg(acosf(c));
     }
   } else {
-    g_imu.rel_angle_deg = 0.0f;
+    // No user reference: zenith / inclination angle of XY plane vs horizon from gravity.
+    // α = atan2(||g_xy||, g_z); normalize (Ax,Ay,Az) to 1g for stable atan2.
+    const float n = imu_math::safe_norm3(ax, ay, az);
+    if (n > 0.0f) {
+      const float nx = ax / n;
+      const float ny = ay / n;
+      const float nz = az / n;
+      const float horiz = sqrtf(nx * nx + ny * ny);
+      float alpha_deg = imu_math::rad2deg(atan2f(horiz, nz));
+      if (alpha_deg < kHorizonTiltDeadbandDeg) alpha_deg = 0.0f;
+      g_imu.rel_angle_deg = alpha_deg;
+    } else {
+      g_imu.rel_angle_deg = 0.0f;
+    }
   }
   portEXIT_CRITICAL(&g_imuMux);
 }
