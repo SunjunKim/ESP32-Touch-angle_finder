@@ -72,7 +72,7 @@ void abs_show(lv_obj_t *incl_container,
   if (secondary) {
     lv_obj_clear_flag(secondary, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_long_mode(secondary, LV_LABEL_LONG_CLIP);
-    lv_obj_align(secondary, LV_ALIGN_CENTER, 0, 84);
+    lv_obj_align(secondary, LV_ALIGN_CENTER, 0, 95);
   }
   if (rel_zero_btn) lv_obj_add_flag(rel_zero_btn, LV_OBJ_FLAG_HIDDEN);
 }
@@ -88,7 +88,7 @@ void abs_update(lv_obj_t *primary,
   char line1[64];
   char line2[64];
   snprintf(line1, sizeof(line1), "Net Tilt: %.2f°", imu.tilt_deg);
-  snprintf(line2, sizeof(line2), "Pitch: %.2f°  Roll: %.2f°", imu.pitch_deg, imu.roll_deg);
+  snprintf(line2, sizeof(line2), "Pitch: %.2f°\nRoll: %.2f°", imu.pitch_deg, imu.roll_deg);
 
   set_label_if_changed(primary, s_last_line1, sizeof(s_last_line1), line1);
   set_label_if_changed(secondary, s_last_line2, sizeof(s_last_line2), line2);

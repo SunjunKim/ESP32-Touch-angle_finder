@@ -17,9 +17,11 @@ struct ImuState {
   float ref_ax_g = 0.0f;
   float ref_ay_g = 0.0f;
   float ref_az_g = 0.0f;
+  float ref_angle = 0.0f;
   bool ref_valid = false;
 
   float rel_angle_deg = 0.0f;
+  float abs_angle_deg = 0.0f;
 
   bool inited = false;
 };

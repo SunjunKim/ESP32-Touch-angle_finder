@@ -82,6 +82,7 @@ void rel_capture_reference_now()
   g_imu.ref_ax_g = g_imu.ax_g;
   g_imu.ref_ay_g = g_imu.ay_g;
   g_imu.ref_az_g = g_imu.az_g;
+  g_imu.ref_angle = g_imu.abs_angle_deg;
   g_imu.ref_valid =
       (imu_math::safe_norm3(g_imu.ref_ax_g, g_imu.ref_ay_g, g_imu.ref_az_g) > 0.0f);
   portEXIT_CRITICAL(&g_imuMux);
@@ -93,30 +94,41 @@ void rel_update_angle_sample()
   const float ax = g_imu.ax_g;
   const float ay = g_imu.ay_g;
   const float az = g_imu.az_g;
-  if (g_imu.ref_valid) {
-    const float nCur = imu_math::safe_norm3(ax, ay, az);
-    const float nRef = imu_math::safe_norm3(g_imu.ref_ax_g, g_imu.ref_ay_g, g_imu.ref_az_g);
-    if (nCur > 0.0f && nRef > 0.0f) {
-      float c = (ax * g_imu.ref_ax_g + ay * g_imu.ref_ay_g + az * g_imu.ref_az_g) / (nCur * nRef);
-      c = imu_math::clampf(c, -1.0f, 1.0f);
-      g_imu.rel_angle_deg = imu_math::rad2deg(acosf(c));
-    }
-  } else {
-    // No user tap: same reference as calibration — LCD face up ⇒ ~ (0,0,-1) g in device frame.
-    // Tilt magnitude vs that normal: 0° flat, 90° on edge (use -nz so atan2(0,1)=0 when nz=-1).
-    const float n = imu_math::safe_norm3(ax, ay, az);
-    if (n > 0.0f) {
-      const float nx = ax / n;
-      const float ny = ay / n;
-      const float nz = az / n;
-      const float horiz = sqrtf(nx * nx + ny * ny);
-      float alpha_deg = imu_math::rad2deg(atan2f(horiz, -nz));
-      if (alpha_deg < kHorizonTiltDeadbandDeg) alpha_deg = 0.0f;
-      g_imu.rel_angle_deg = alpha_deg;
-    } else {
-      g_imu.rel_angle_deg = 0.0f;
-    }
+  const float n = imu_math::safe_norm3(ax, ay, az);
+  if (n <= 0.0f) {
+    g_imu.rel_angle_deg = 0.0f;
+    portEXIT_CRITICAL(&g_imuMux);
+    return;
   }
+  const float cx = ax / n;
+  const float cy = ay / n;
+  const float cz = az / n;
+
+  // Same geometry as atan2(horiz, -nz) vs nominal down (0,0,-1), generalized: tilt angle between
+  // current gravity unit vector and the "zero" direction (captured ref, or LCD-face-up -Z).
+  float rdx, rdy, rdz;
+
+  rdx = 0.0f;
+  rdy = 0.0f;
+  rdz = -1.0f;
+
+  const float dot = cx * rdx + cy * rdy + cz * rdz;
+  const float crx = cy * rdz - cz * rdy;
+  const float cry = cz * rdx - cx * rdz;
+  const float crz = cx * rdy - cy * rdx;
+  const float cross_mag = sqrtf(crx * crx + cry * cry + crz * crz);
+  float alpha_deg = imu_math::rad2deg(atan2f(cross_mag, dot));
+
+  if (!g_imu.ref_valid && alpha_deg < kHorizonTiltDeadbandDeg) {
+    alpha_deg = 0.0f;
+  }
+  g_imu.abs_angle_deg = alpha_deg;
+
+  if (g_imu.ref_valid) {
+    alpha_deg = fabsf(alpha_deg - g_imu.ref_angle);
+  }
+
+  g_imu.rel_angle_deg = alpha_deg;
   portEXIT_CRITICAL(&g_imuMux);
 }
 

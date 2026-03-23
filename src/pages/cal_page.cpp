@@ -107,6 +107,7 @@ static uint8_t s_calStep = 0;
 static uint32_t s_calStillStartMs = 0;
 static float s_calSumAx = 0.0f, s_calSumAy = 0.0f, s_calSumAz = 0.0f;
 static uint32_t s_calSumCount = 0;
+static uint32_t s_calStableAllCount = 0;
 static float s_calLastRaw[3] = {0.0f, 0.0f, 0.0f};
 static bool s_calPrevValid = false;
 static uint8_t s_calBadStreak = 0;
@@ -117,7 +118,9 @@ static constexpr float kCalMagMaxG = 1.14f;
 static constexpr float kCalDotMin = 0.90f;
 static constexpr float kCalJitterMaxG = 0.14f;
 static constexpr uint32_t kCalHoldMs = 650;
-static constexpr uint32_t kCalMinStableSamples = 40;
+static constexpr uint32_t kCalMinStableSamples = 20;
+// Discard this many stable samples at the start of each hold (settling after placement).
+static constexpr uint32_t kCalStableDiscardFirst = kCalMinStableSamples / 2;
 static constexpr uint8_t kCalBadStreakToReset = 8;
 static CalUiData s_calUi;
 static portMUX_TYPE s_calUiMux = portMUX_INITIALIZER_UNLOCKED;
@@ -314,11 +317,15 @@ static void wizard_imu_process_sample(float ax, float ay, float az)
     s_calBadStreak = 0;
     if (s_calStillStartMs == 0) {
       s_calStillStartMs = now;
+      s_calStableAllCount = 0;
     }
-    s_calSumAx += ax;
-    s_calSumAy += ay;
-    s_calSumAz += az;
-    s_calSumCount++;
+    s_calStableAllCount++;
+    if (s_calStableAllCount > kCalStableDiscardFirst) {
+      s_calSumAx += ax;
+      s_calSumAy += ay;
+      s_calSumAz += az;
+      s_calSumCount++;
+    }
 
     const uint32_t held = now - s_calStillStartMs;
     if (held >= kCalHoldMs && s_calSumCount >= kCalMinStableSamples) {
@@ -329,6 +336,7 @@ static void wizard_imu_process_sample(float ax, float ay, float az)
       s_calStillStartMs = 0;
       s_calSumAx = s_calSumAy = s_calSumAz = 0.0f;
       s_calSumCount = 0;
+      s_calStableAllCount = 0;
       s_calPrevValid = false;
 
       if (s_calStep < kCalSteps) {
@@ -352,6 +360,7 @@ static void wizard_imu_process_sample(float ax, float ay, float az)
       s_calStillStartMs = 0;
       s_calSumAx = s_calSumAy = s_calSumAz = 0.0f;
       s_calSumCount = 0;
+      s_calStableAllCount = 0;
       s_calBadStreak = 0;
     }
   }
@@ -548,6 +557,7 @@ void cal_wizard_reset()
   s_calStillStartMs = 0;
   s_calSumAx = s_calSumAy = s_calSumAz = 0.0f;
   s_calSumCount = 0;
+  s_calStableAllCount = 0;
   s_calPrevValid = false;
   s_calBadStreak = 0;
   portENTER_CRITICAL(&s_calUiMux);
