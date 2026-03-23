@@ -87,9 +87,12 @@ void rel_capture_reference_now()
   portEXIT_CRITICAL(&g_imuMux);
 }
 
-void rel_update_angle_sample(float ax, float ay, float az)
+void rel_update_angle_sample()
 {
   portENTER_CRITICAL(&g_imuMux);
+  const float ax = g_imu.ax_g;
+  const float ay = g_imu.ay_g;
+  const float az = g_imu.az_g;
   if (g_imu.ref_valid) {
     const float nCur = imu_math::safe_norm3(ax, ay, az);
     const float nRef = imu_math::safe_norm3(g_imu.ref_ax_g, g_imu.ref_ay_g, g_imu.ref_az_g);
@@ -99,15 +102,15 @@ void rel_update_angle_sample(float ax, float ay, float az)
       g_imu.rel_angle_deg = imu_math::rad2deg(acosf(c));
     }
   } else {
-    // No user reference: zenith / inclination angle of XY plane vs horizon from gravity.
-    // α = atan2(||g_xy||, g_z); normalize (Ax,Ay,Az) to 1g for stable atan2.
+    // No user tap: same reference as calibration — LCD face up ⇒ ~ (0,0,-1) g in device frame.
+    // Tilt magnitude vs that normal: 0° flat, 90° on edge (use -nz so atan2(0,1)=0 when nz=-1).
     const float n = imu_math::safe_norm3(ax, ay, az);
     if (n > 0.0f) {
       const float nx = ax / n;
       const float ny = ay / n;
       const float nz = az / n;
       const float horiz = sqrtf(nx * nx + ny * ny);
-      float alpha_deg = imu_math::rad2deg(atan2f(horiz, nz));
+      float alpha_deg = imu_math::rad2deg(atan2f(horiz, -nz));
       if (alpha_deg < kHorizonTiltDeadbandDeg) alpha_deg = 0.0f;
       g_imu.rel_angle_deg = alpha_deg;
     } else {

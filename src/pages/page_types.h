@@ -6,6 +6,7 @@
 struct ImuUiData {
   float pitch_deg = 0.0f;
   float roll_deg = 0.0f;
+  float tilt_deg = 0.0f;
   float rel_angle_deg = 0.0f;
   bool ref_valid = false;
 };

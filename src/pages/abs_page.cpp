@@ -39,7 +39,7 @@ static void update_inclinometer(lv_obj_t *incl_container, lv_obj_t *incl_bubble,
   const float px_range = 40.0f;
 
   const float dx = clampf(roll_deg / max_deg, -1.0f, 1.0f) * px_range;
-  const float dy = clampf(pitch_deg / max_deg, -1.0f, 1.0f) * px_range;
+  const float dy = clampf(pitch_deg / max_deg, -1.0f, 1.0f) * px_range * -1;
 
   const float cx = lv_obj_get_width(incl_container) / 2.0f;
   const float cy = lv_obj_get_height(incl_container) / 2.0f;
@@ -87,8 +87,8 @@ void abs_update(lv_obj_t *primary,
 
   char line1[64];
   char line2[64];
-  snprintf(line1, sizeof(line1), "Pitch: %.2f°", imu.pitch_deg);
-  snprintf(line2, sizeof(line2), "Roll : %.2f°", imu.roll_deg);
+  snprintf(line1, sizeof(line1), "Net Tilt: %.2f°", imu.tilt_deg);
+  snprintf(line2, sizeof(line2), "Pitch: %.2f°  Roll: %.2f°", imu.pitch_deg, imu.roll_deg);
 
   set_label_if_changed(primary, s_last_line1, sizeof(s_last_line1), line1);
   set_label_if_changed(secondary, s_last_line2, sizeof(s_last_line2), line2);
@@ -97,9 +97,7 @@ void abs_update(lv_obj_t *primary,
 
 void abs_accel_to_pitch_roll(float ax, float ay, float az, float *pitch_deg, float *roll_deg)
 {
-  if (!pitch_deg || !roll_deg) return;
-  *pitch_deg = imu_math::rad2deg(atan2f(ax, sqrtf(ay * ay + az * az)));
-  *roll_deg = imu_math::rad2deg(atan2f(ay, sqrtf(ax * ax + az * az)));
+  imu_math::accel_vector_to_tilt_pitch_roll(ax, ay, az, pitch_deg, roll_deg, nullptr);
 }
 
 } // namespace ui_pages

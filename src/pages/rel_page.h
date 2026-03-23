@@ -11,7 +11,8 @@ lv_obj_t *rel_create_angle_label(lv_obj_t *parent);
 lv_obj_t *rel_create_zero_button(lv_obj_t *parent, lv_event_cb_t on_click);
 
 void rel_capture_reference_now();
-void rel_update_angle_sample(float ax, float ay, float az);
+// Uses g_imu.ax_g / ay_g / az_g (calibrated device frame) under the same mutex as ref_*.
+void rel_update_angle_sample();
 void rel_on_tap_zero();
 
 void rel_show(lv_obj_t *incl_container,

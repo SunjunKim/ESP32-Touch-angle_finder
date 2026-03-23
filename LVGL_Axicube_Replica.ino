@@ -562,6 +562,7 @@ static void imu_task(void * /*param*/)
   const TickType_t intWait = pdMS_TO_TICKS(100);
   float prev_ax = 0.0f, prev_ay = 0.0f, prev_az = 0.0f;
   bool prev_valid = false;
+  bool prev_mode_was_calibrate = false;
   static constexpr float kMotionDeltaG = 0.08f;
 
   portENTER_CRITICAL(&g_imuMux);
@@ -588,43 +589,72 @@ static void imu_task(void * /*param*/)
     }
 
     const AppMode modeSnap = app_mode_snapshot();
-    if (modeSnap == AppMode::Calibrate) {
+    const bool in_calibrate = (modeSnap == AppMode::Calibrate);
+
+    if (in_calibrate) {
       ui_pages::cal_wizard_imu_sample(ax, ay, az);
       mark_user_activity();
-    } else if (ui_pages::cal_accel_cal_valid()) {
-      ui_pages::cal_apply_accel(ax, ay, az);
+      if (!prev_valid) {
+        prev_ax = ax;
+        prev_ay = ay;
+        prev_az = az;
+        prev_valid = true;
+        mark_motion_activity();
+      } else {
+        const float delta = imu_math::safe_norm3(ax - prev_ax, ay - prev_ay, az - prev_az);
+        if (delta >= kMotionDeltaG) {
+          mark_motion_activity();
+        }
+        prev_ax = ax;
+        prev_ay = ay;
+        prev_az = az;
+      }
+      prev_mode_was_calibrate = true;
+      continue;
     }
 
-    // Accelerometer vector (raw during CAL wizard; calibrated otherwise).
-    float pitch = 0.0f;
-    float roll = 0.0f;
-    ui_pages::abs_accel_to_pitch_roll(ax, ay, az, &pitch, &roll);
+    if (prev_mode_was_calibrate) {
+      prev_valid = false;
+      prev_mode_was_calibrate = false;
+    }
+
+    ui_pages::ImuCalibratedSample imu_cal;
+    ui_pages::imu_calibrated_reading(ax, ay, az, &imu_cal, true);
+
+    const float pitch = imu_cal.pitch_deg;
+    const float roll = imu_cal.roll_deg;
+    const float tilt = imu_cal.tilt_deg;
+
+    const float mx = imu_cal.ax_g;
+    const float my = imu_cal.ay_g;
+    const float mz = imu_cal.az_g;
 
     if (!prev_valid) {
-      prev_ax = ax;
-      prev_ay = ay;
-      prev_az = az;
+      prev_ax = mx;
+      prev_ay = my;
+      prev_az = mz;
       prev_valid = true;
       mark_motion_activity();
     } else {
-      const float delta = imu_math::safe_norm3(ax - prev_ax, ay - prev_ay, az - prev_az);
+      const float delta = imu_math::safe_norm3(mx - prev_ax, my - prev_ay, mz - prev_az);
       if (delta >= kMotionDeltaG) {
         mark_motion_activity();
       }
-      prev_ax = ax;
-      prev_ay = ay;
-      prev_az = az;
+      prev_ax = mx;
+      prev_ay = my;
+      prev_az = mz;
     }
 
     portENTER_CRITICAL(&g_imuMux);
-    g_imu.ax_g = ax;
-    g_imu.ay_g = ay;
-    g_imu.az_g = az;
+    g_imu.ax_g = mx;
+    g_imu.ay_g = my;
+    g_imu.az_g = mz;
     g_imu.pitch_deg = pitch;
     g_imu.roll_deg = roll;
+    g_imu.tilt_deg = tilt;
     portEXIT_CRITICAL(&g_imuMux);
 
-    ui_pages::rel_update_angle_sample(ax, ay, az);
+    ui_pages::rel_update_angle_sample();
   }
 }
 
@@ -791,6 +821,7 @@ static void ui_refresh()
   ImuUiData ui_imu;
   ui_imu.pitch_deg = s.pitch_deg;
   ui_imu.roll_deg = s.roll_deg;
+  ui_imu.tilt_deg = s.tilt_deg;
   ui_imu.rel_angle_deg = s.rel_angle_deg;
   ui_imu.ref_valid = s.ref_valid;
 

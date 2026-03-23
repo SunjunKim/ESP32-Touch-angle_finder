@@ -12,6 +12,7 @@ struct ImuState {
 
   float pitch_deg = 0.0f;
   float roll_deg = 0.0f;
+  float tilt_deg = 0.0f;
 
   float ref_ax_g = 0.0f;
   float ref_ay_g = 0.0f;

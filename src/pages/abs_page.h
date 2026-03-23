@@ -17,6 +17,7 @@ void abs_update(lv_obj_t *primary,
                 lv_obj_t *incl_bubble,
                 const ImuUiData &imu);
 
+// Expects device-frame accelerometer (g), e.g. after imu_calibrated_reading / cal_apply_accel.
 void abs_accel_to_pitch_roll(float ax, float ay, float az, float *pitch_deg, float *roll_deg);
 
 } // namespace ui_pages

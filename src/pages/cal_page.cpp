@@ -1,6 +1,7 @@
 #include "cal_page.h"
 
 #include "app_hooks.h"
+#include "imu_math.h"
 #include <Arduino.h>
 #include "pin_config.h"
 #include <Preferences.h>
@@ -22,18 +23,22 @@ static lv_obj_t *s_edge_bottom = nullptr;
 static lv_obj_t *s_edge_left = nullptr;
 static lv_obj_t *s_edge_right = nullptr;
 
-// ---- Accel calibration (6-face, bias + diagonal scale) ----
+// ---- Accel calibration (6-face: bias + diagonal scale + mount rotation) ----
 static constexpr char kAccCalPrefsNs[] = "imu_acc6";
+static constexpr uint8_t kAccCalPrefsVer = 2;
 static float s_accBias[3] = {0.0f, 0.0f, 0.0f};
 static float s_accScale[3] = {1.0f, 1.0f, 1.0f};
+// Row-major R: v_device = R * v_rect; v_rect_i = scale_i * (raw_i - bias_i)
+static float s_accR[9] = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
 static bool s_accCalValid = false;
 
 static inline void apply_accel_cal_impl(float &ax, float &ay, float &az)
 {
   if (!s_accCalValid) return;
-  ax = s_accScale[0] * (ax - s_accBias[0]);
-  ay = s_accScale[1] * (ay - s_accBias[1]);
-  az = s_accScale[2] * (az - s_accBias[2]);
+  const float vx = s_accScale[0] * (ax - s_accBias[0]);
+  const float vy = s_accScale[1] * (ay - s_accBias[1]);
+  const float vz = s_accScale[2] * (az - s_accBias[2]);
+  imu_math::mat3_vec3_rowmajor(s_accR, vx, vy, vz, &ax, &ay, &az);
 }
 
 static void save_accel_cal_prefs()
@@ -49,6 +54,12 @@ static void save_accel_cal_prefs()
   p.putFloat("sx", s_accScale[0]);
   p.putFloat("sy", s_accScale[1]);
   p.putFloat("sz", s_accScale[2]);
+  p.putUChar("ver", kAccCalPrefsVer);
+  for (int i = 0; i < 9; i++) {
+    char key[] = "r0";
+    key[1] = (char)('0' + i);
+    p.putFloat(key, s_accR[i]);
+  }
   p.end();
 }
 
@@ -68,6 +79,13 @@ static bool compute_accel_cal_from_6face(const float s[6][3])
   s_accScale[2] = 2.0f / dz;
   if (!isfinite(s_accScale[0]) || !isfinite(s_accScale[1]) || !isfinite(s_accScale[2])) {
     return false;
+  }
+  float Rmount[9];
+  if (!imu_math::acc_mount_matrix_from_6face(s, s_accBias, s_accScale, Rmount)) {
+    return false;
+  }
+  for (int i = 0; i < 9; i++) {
+    s_accR[i] = Rmount[i];
   }
   s_accCalValid = true;
   save_accel_cal_prefs();
@@ -473,6 +491,17 @@ bool cal_load_accel_prefs()
   s_accScale[0] = p.getFloat("sx", 1.0f);
   s_accScale[1] = p.getFloat("sy", 1.0f);
   s_accScale[2] = p.getFloat("sz", 1.0f);
+  const uint8_t ver = p.getUChar("ver", 0);
+  static const float kIdentR[9] = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
+  if (ver >= 2) {
+    for (int i = 0; i < 9; i++) {
+      char key[] = "r0";
+      key[1] = (char)('0' + i);
+      s_accR[i] = p.getFloat(key, kIdentR[i]);
+    }
+  } else {
+    memcpy(s_accR, kIdentR, sizeof(s_accR));
+  }
   p.end();
   s_accCalValid = true;
   return true;
@@ -481,6 +510,28 @@ bool cal_load_accel_prefs()
 void cal_apply_accel(float &ax, float &ay, float &az)
 {
   apply_accel_cal_impl(ax, ay, az);
+}
+
+bool imu_calibrated_reading(float raw_ax,
+                            float raw_ay,
+                            float raw_az,
+                            ImuCalibratedSample *out,
+                            bool apply_saved_calibration)
+{
+  if (!out) {
+    return false;
+  }
+  float ax = raw_ax;
+  float ay = raw_ay;
+  float az = raw_az;
+  if (apply_saved_calibration) {
+    apply_accel_cal_impl(ax, ay, az);
+  }
+  out->ax_g = ax;
+  out->ay_g = ay;
+  out->az_g = az;
+  imu_math::accel_vector_to_tilt_pitch_roll(ax, ay, az, &out->pitch_deg, &out->roll_deg, &out->tilt_deg);
+  return true;
 }
 
 bool cal_accel_cal_valid()

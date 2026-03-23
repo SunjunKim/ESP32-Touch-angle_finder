@@ -24,9 +24,26 @@ void cal_update(lv_obj_t *primary,
                 const CalUiData &cal);
 
 // ---- Accel calibration (prefs + 6-face wizard, IMU task / loop integration) ----
+// Raw → bias + scale + mount rotation → device-frame g vector + Euler-style angles.
+struct ImuCalibratedSample {
+  float ax_g = 0.0f;
+  float ay_g = 0.0f;
+  float az_g = 0.0f;
+  float pitch_deg = 0.0f;
+  float roll_deg = 0.0f;
+  float tilt_deg = 0.0f;
+};
+
 bool cal_load_accel_prefs();
 void cal_apply_accel(float &ax, float &ay, float &az);
 bool cal_accel_cal_valid();
+// Single entry point: applies saved calibration unless apply_saved_calibration is false
+// (use false during the CAL wizard so live samples stay raw).
+bool imu_calibrated_reading(float raw_ax,
+                            float raw_ay,
+                            float raw_az,
+                            ImuCalibratedSample *out,
+                            bool apply_saved_calibration = true);
 
 void cal_wizard_reset();
 void cal_wizard_imu_sample(float ax, float ay, float az);
