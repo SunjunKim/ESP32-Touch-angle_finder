@@ -8,7 +8,7 @@ namespace ui_pages {
 const lv_font_t *rel_angle_font();
 
 lv_obj_t *rel_create_angle_label(lv_obj_t *parent);
-lv_obj_t *rel_create_zero_button(lv_obj_t *parent, lv_event_cb_t on_click);
+lv_obj_t *rel_create_zero_button(lv_obj_t *parent);
 
 void rel_capture_reference_now();
 // Uses g_imu.ax_g / ay_g / az_g (calibrated device frame) under the same mutex as ref_*.
@@ -23,6 +23,7 @@ void rel_show(lv_obj_t *incl_container,
 
 void rel_update(lv_obj_t *rel_angle_big,
                 lv_obj_t *debug_label,
+                lv_obj_t *rel_zero_btn,
                 const ImuUiData &imu);
 
 } // namespace ui_pages

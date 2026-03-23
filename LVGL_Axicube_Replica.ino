@@ -703,24 +703,6 @@ static void ui_update_background(bool relRefValid)
   lv_obj_set_style_bg_color(lv_scr_act(), bg, 0);
 }
 
-static void do_calibration_action()
-{
-  switch (g_mode) {
-    case AppMode::RelAngle:
-      ui_pages::rel_on_tap_zero();
-      break;
-    case AppMode::AbsAngle:
-    case AppMode::Calibrate:
-      break;
-  }
-}
-
-static void ui_tap_cb(lv_event_t *e)
-{
-  if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
-  do_calibration_action();
-}
-
 static uint8_t voltage_to_percent(float v)
 {
   // Single-cell Li-Po approximation (under light load).
@@ -841,7 +823,7 @@ static void ui_refresh()
         lv_obj_add_flag(ui_cal_tap_layer, LV_OBJ_FLAG_HIDDEN);
       }
       ui_pages::rel_show(ui_incl_container, ui_rel_angle_big, ui_primary, ui_secondary, ui_rel_zero_btn);
-      ui_pages::rel_update(ui_rel_angle_big, ui_debug, ui_imu);
+      ui_pages::rel_update(ui_rel_angle_big, ui_debug, ui_rel_zero_btn, ui_imu);
       break;
     case AppMode::Calibrate: {
       const CalUiData cu = ui_pages::cal_ui_for_refresh();
@@ -958,7 +940,7 @@ static void ui_build()
   lv_obj_align(ui_debug, LV_ALIGN_BOTTOM_MID, 0, -8);
   lv_label_set_text(ui_debug, "");
 
-  ui_rel_zero_btn = ui_pages::rel_create_zero_button(lv_scr_act(), ui_tap_cb);
+  ui_rel_zero_btn = ui_pages::rel_create_zero_button(lv_scr_act());
   ui_cal_tap_layer = ui_pages::cal_create_intro_tap_layer(lv_scr_act());
 
   // Reflect initial mode immediately (ui_refresh will keep it updated).
