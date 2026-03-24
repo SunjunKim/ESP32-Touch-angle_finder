@@ -23,7 +23,7 @@ static char s_last_dbg[96] = {0};
 static char s_last_zero_btn_label[40] = {0};
 
 // Idle noise on Ax/Ay slightly inflates sqrt(Ax²+Ay²); squash sub-threshold jitter.
-static constexpr float kHorizonTiltDeadbandDeg = 0.35f;
+static constexpr float kHorizonTiltDeadbandDeg = 0.15f;
 
 static inline float round_to_step(float v, float step)
 {
@@ -135,13 +135,16 @@ void rel_update_angle_sample()
   if (!g_imu.ref_valid && alpha_deg < kHorizonTiltDeadbandDeg) {
     alpha_deg = 0.0f;
   }
-  g_imu.abs_angle_deg = alpha_deg;
+
+  g_imu.abs_angle_deg = (g_imu.pitch_deg >= 0.0f) ? fabsf(alpha_deg) : -fabsf(alpha_deg);
 
   if (g_imu.ref_valid) {
-    alpha_deg = fabsf(alpha_deg - g_imu.ref_angle);
+    g_imu.rel_angle_deg = g_imu.abs_angle_deg - g_imu.ref_angle;
+  }
+  else {
+    g_imu.rel_angle_deg = g_imu.abs_angle_deg;
   }
 
-  g_imu.rel_angle_deg = alpha_deg;
   portEXIT_CRITICAL(&g_imuMux);
 }
 
