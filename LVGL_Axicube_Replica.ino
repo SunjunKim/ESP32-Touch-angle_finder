@@ -1,7 +1,7 @@
 // Using library Driver Bus Library Based on Arduino v1.0.1
 // Using library GFX Library for Arduino v1.6.5
 // Using library Mylibrary (legacy)
-// Using library SensorLib v0.2.1
+// Using library SensorLib v0.4.0
 // Using library lvgl v8.4.0
 // Using library Networking v3.3.7
 // Using library SPI v3.3.7
@@ -528,6 +528,7 @@ portMUX_TYPE g_imuMux = portMUX_INITIALIZER_UNLOCKED;
 static void imu_task(void * /*param*/)
 {
   // Bring up QMI8658 in a simple raw-read configuration (acc + gyro).
+  qmi.setPins(kImuIntPin);
   if (!qmi.begin(Wire, QMI8658_L_SLAVE_ADDRESS, IIC_SDA, IIC_SCL)) {
     portENTER_CRITICAL(&g_imuMux);
     g_imu.inited = false;
@@ -535,27 +536,31 @@ static void imu_task(void * /*param*/)
     vTaskDelete(NULL);
   }
 
+  // On-demand gyro calibration (QMI8658 COD): device must be stationary.
+  USBSerial.println(F("QMI8658: COD calibration (hold still)..."));
+  if (!qmi.calibration()) {
+    USBSerial.println(F("QMI8658: COD failed — continuing"));
+  } else {
+    USBSerial.println(F("QMI8658: COD OK"));
+  }
+
   // "Stable" choice: modest ODR + LPF enabled.
   qmi.configAccelerometer(
     SensorQMI8658::ACC_RANGE_2G,
     SensorQMI8658::ACC_ODR_250Hz,
-    SensorQMI8658::LPF_MODE_0,
-    true,   // LPF enable
-    false   // self-test disable
+    SensorQMI8658::LPF_MODE_0
   );
   qmi.enableAccelerometer();
 
   qmi.configGyroscope(
     SensorQMI8658::GYR_RANGE_128DPS,
     SensorQMI8658::GYR_ODR_224_2Hz,
-    SensorQMI8658::LPF_MODE_0,
-    true,
-    false
+    SensorQMI8658::LPF_MODE_0
   );
   qmi.enableGyroscope();
 
   qmi.enableLockingMechanism();
-  qmi.enableINT(SensorQMI8658::IntPin1);
+  qmi.enableINT(SensorQMI8658::INTERRUPT_PIN_1);
 
   // INT-driven IMU reads: wait for data-ready interrupt.
   // Keep a timeout as a resilience fallback.

@@ -120,7 +120,7 @@ static constexpr float kCalJitterMaxG = 0.14f;
 static constexpr uint32_t kCalHoldMs = 650;
 static constexpr uint32_t kCalMinStableSamples = 20;
 // Discard this many stable samples at the start of each hold (settling after placement).
-static constexpr uint32_t kCalStableDiscardFirst = kCalMinStableSamples / 2;
+static constexpr uint32_t kCalStableDiscardFirst = kCalMinStableSamples;
 static constexpr uint8_t kCalBadStreakToReset = 8;
 static CalUiData s_calUi;
 static portMUX_TYPE s_calUiMux = portMUX_INITIALIZER_UNLOCKED;
