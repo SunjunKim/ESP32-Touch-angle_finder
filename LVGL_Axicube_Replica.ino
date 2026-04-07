@@ -125,6 +125,8 @@ static constexpr uint32_t kBacklightPwmHz = 5000;
 static constexpr uint8_t  kBacklightPwmResBits = 8; // duty 0..255
 static constexpr int      kBacklightPwmChannel = 0; // legacy cores only (kept for reference)
 
+static const char kAppVersion[] = "v0.0.1";
+
 static uint8_t g_backlightDuty = kBacklightFull;
 static uint32_t g_lastUserActivityMs = 0;
 static uint32_t g_lastMotionActivityMs = 0;
@@ -681,6 +683,7 @@ static lv_obj_t *ui_incl_bubble = nullptr;
 static lv_obj_t *ui_incl_cross_h = nullptr;
 static lv_obj_t *ui_incl_cross_v = nullptr;
 static lv_obj_t *ui_rel_angle_big = nullptr;
+static lv_obj_t *ui_splash = nullptr;
 
 static AppMode ui_last_mode = (AppMode)255;
 static uint8_t ui_last_bg_kind = 255; // 0=black, 1=rel-warn, 2=cal
@@ -787,6 +790,20 @@ static void ui_set_mode_label(AppMode mode)
 
 static void ui_refresh()
 {
+  bool imu_ready = false;
+  portENTER_CRITICAL(&g_imuMux);
+  imu_ready = g_imu.inited;
+  portEXIT_CRITICAL(&g_imuMux);
+
+  if (ui_splash) {
+    if (!imu_ready) {
+      lv_obj_clear_flag(ui_splash, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_move_foreground(ui_splash);
+      return;
+    }
+    lv_obj_add_flag(ui_splash, LV_OBJ_FLAG_HIDDEN);
+  }
+
   const AppMode mode = app_mode_snapshot();
   const AppMode prev_mode = ui_last_mode;
   ImuState s;
@@ -952,6 +969,46 @@ static void ui_build()
   if (g_mode == AppMode::AbsAngle || g_mode == AppMode::Calibrate) {
     lv_obj_add_flag(ui_rel_zero_btn, LV_OBJ_FLAG_HIDDEN);
   }
+
+  // Splash until IMU task finishes init + gyro COD calibration (g_imu.inited).
+  ui_splash = lv_obj_create(lv_scr_act());
+  lv_obj_remove_style_all(ui_splash);
+  lv_obj_set_size(ui_splash, LCD_WIDTH, LCD_HEIGHT);
+  lv_obj_align(ui_splash, LV_ALIGN_TOP_LEFT, 0, 0);
+  lv_obj_set_style_bg_color(ui_splash, lv_color_black(), 0);
+  lv_obj_set_style_bg_opa(ui_splash, LV_OPA_COVER, 0);
+  lv_obj_clear_flag(ui_splash, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(ui_splash, LV_OBJ_FLAG_CLICKABLE);
+
+  lv_obj_t *splash_col = lv_obj_create(ui_splash);
+  lv_obj_remove_style_all(splash_col);
+  lv_obj_set_width(splash_col, LCD_WIDTH);
+  lv_obj_set_height(splash_col, LV_SIZE_CONTENT);
+  lv_obj_align(splash_col, LV_ALIGN_CENTER, 0, -(LCD_HEIGHT / 8));
+  lv_obj_set_layout(splash_col, LV_LAYOUT_FLEX);
+  lv_obj_set_flex_flow(splash_col, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align(splash_col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_row(splash_col, 10, 0);
+  lv_obj_set_style_pad_top(splash_col, 8, 0);
+  lv_obj_set_style_pad_bottom(splash_col, 8, 0);
+
+  // No transform_zoom here: with LV_COLOR_SCREEN_TRANSP 0 (typical Arduino LVGL), SW draw
+  // cannot create the alpha layer and the label is not drawn at all.
+  lv_obj_t *splash_title = lv_label_create(splash_col);
+  lv_obj_set_width(splash_title, LCD_WIDTH);
+  lv_label_set_long_mode(splash_title, LV_LABEL_LONG_WRAP);
+  lv_obj_set_style_text_align(splash_title, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_style_text_font(splash_title, &lv_font_montserrat_28, 0);
+  lv_label_set_text(splash_title, "[InoCube]");
+
+  lv_obj_t *splash_ver = lv_label_create(splash_col);
+  lv_obj_set_width(splash_ver, LCD_WIDTH);
+  lv_label_set_long_mode(splash_ver, LV_LABEL_LONG_WRAP);
+  lv_obj_set_style_text_align(splash_ver, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_style_text_font(splash_ver, &lv_font_montserrat_20, 0);
+  lv_label_set_text(splash_ver, kAppVersion);
+
+  lv_obj_move_foreground(ui_splash);
 }
 
 static void setup_hardware()
