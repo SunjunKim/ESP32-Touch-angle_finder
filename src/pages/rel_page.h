@@ -27,4 +27,3 @@ void rel_update(lv_obj_t *rel_angle_big,
                 const ImuUiData &imu);
 
 } // namespace ui_pages
-

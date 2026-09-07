@@ -538,10 +538,13 @@ static void IRAM_ATTR imu_int_isr()
 
 ImuState g_imu;
 portMUX_TYPE g_imuMux = portMUX_INITIALIZER_UNLOCKED;
+#ifndef AXICUBE_REL_DIAGNOSTICS
+#define AXICUBE_REL_DIAGNOSTICS 0
+#endif
 
 static void imu_task(void * /*param*/)
 {
-  // Bring up QMI8658 in a simple raw-read configuration (acc + gyro).
+  // Accelerometer-only REL; no gyro startup calibration or integration.
   qmi.setPins(kImuIntPin);
   if (!qmi.begin(Wire, QMI8658_L_SLAVE_ADDRESS, IIC_SDA, IIC_SCL)) {
     portENTER_CRITICAL(&g_imuMux);
@@ -550,35 +553,22 @@ static void imu_task(void * /*param*/)
     vTaskDelete(NULL);
   }
 
-  // On-demand gyro calibration (QMI8658 COD): device must be stationary.
-  USBSerial.println(F("QMI8658: COD calibration (hold still)..."));
-  if (!qmi.calibration()) {
-    USBSerial.println(F("QMI8658: COD failed — continuing"));
-  } else {
-    USBSerial.println(F("QMI8658: COD OK"));
-  }
-
+  // Accelerometer only: no gyro COD or bias settling.
+  qmi.disableGyroscope();
   // "Stable" choice: modest ODR + LPF enabled.
   qmi.configAccelerometer(
     SensorQMI8658::ACC_RANGE_2G,
-    SensorQMI8658::ACC_ODR_250Hz,
+    SensorQMI8658::ACC_ODR_125Hz,
     SensorQMI8658::LPF_MODE_0
   );
   qmi.enableAccelerometer();
-
-  qmi.configGyroscope(
-    SensorQMI8658::GYR_RANGE_128DPS,
-    SensorQMI8658::GYR_ODR_224_2Hz,
-    SensorQMI8658::LPF_MODE_0
-  );
-  qmi.enableGyroscope();
 
   qmi.enableLockingMechanism();
   qmi.enableINT(SensorQMI8658::INTERRUPT_PIN_1);
 
   // INT-driven IMU reads: wait for data-ready interrupt.
   // Keep a timeout as a resilience fallback.
-  const TickType_t intWait = pdMS_TO_TICKS(100);
+  const TickType_t intWait = pdMS_TO_TICKS(4);
   float prev_ax = 0.0f, prev_ay = 0.0f, prev_az = 0.0f;
   bool prev_valid = false;
   bool prev_mode_was_calibrate = false;
@@ -599,11 +589,8 @@ static void imu_task(void * /*param*/)
       continue;
     }
 
-    float ax, ay, az, gx, gy, gz;
+    float ax, ay, az;
     if (!qmi.getAccelerometer(ax, ay, az)) {
-      continue;
-    }
-    if (!qmi.getGyroscope(gx, gy, gz)) {
       continue;
     }
 
@@ -611,6 +598,9 @@ static void imu_task(void * /*param*/)
     const bool in_calibrate = (modeSnap == AppMode::Calibrate);
 
     if (in_calibrate) {
+      portENTER_CRITICAL(&g_imuMux);
+      g_imu.ref_valid=g_imu.sample_valid=false;
+      portEXIT_CRITICAL(&g_imuMux);
       ui_pages::cal_wizard_imu_sample(ax, ay, az);
       mark_user_activity();
       if (!prev_valid) {
@@ -674,6 +664,19 @@ static void imu_task(void * /*param*/)
     portEXIT_CRITICAL(&g_imuMux);
 
     ui_pages::rel_update_angle_sample();
+#if AXICUBE_REL_DIAGNOSTICS
+    static uint32_t diag_ms=0;
+    if(USBSerial&&(uint32_t)(millis()-diag_ms)>=1000){
+      diag_ms=millis();ImuState snapshot;
+      portENTER_CRITICAL(&g_imuMux);snapshot=g_imu;portEXIT_CRITICAL(&g_imuMux);
+      char line[256];
+      int length=snprintf(line,sizeof(line),"REL_CONTACT A=%.6f,%.6f,%.6f tilt=%.4f ref=%.4f angle=%.4f set=%d valid=%d moving=%d normal=%u gyro=off\n",
+        mx,my,mz,snapshot.abs_angle_deg,snapshot.ref_angle,snapshot.rel_angle_deg,
+        snapshot.ref_valid,snapshot.sample_valid,snapshot.moving,(unsigned)snapshot.ref_normal_axis);
+      if(length>0&&length<(int)sizeof(line)&&USBSerial.availableForWrite()>=length)
+        USBSerial.write((const uint8_t *)line,length);
+    }
+#endif
   }
 }
 
@@ -840,6 +843,9 @@ static void ui_refresh()
   ui_imu.tilt_deg = s.tilt_deg;
   ui_imu.rel_angle_deg = s.rel_angle_deg;
   ui_imu.ref_valid = s.ref_valid;
+  ui_imu.ref_normal_axis = s.ref_normal_axis;
+  ui_imu.sample_valid=s.sample_valid&&s.sample_ms&&(uint32_t)(millis()-s.sample_ms)<500;
+  ui_imu.moving=s.moving;
 
   switch (mode) {
     case AppMode::AbsAngle:
@@ -1135,6 +1141,8 @@ static void setup_tasks()
 
 void setup()
 {
+  USBSerial.setTxTimeoutMs(0);
+  USBSerial.setTxBufferSize(1024);
   USBSerial.begin(115200);
 
   setup_hardware();
@@ -1160,4 +1168,3 @@ void loop()
   backlight_idle_manager();
   power_sleep_manager();
 }
-

@@ -9,6 +9,8 @@ struct ImuUiData {
   float tilt_deg = 0.0f;
   float rel_angle_deg = 0.0f;
   bool ref_valid = false;
+  uint8_t ref_normal_axis = 2;
+  bool sample_valid=false,moving=false;
 };
 
 struct CalUiData {
@@ -20,4 +22,3 @@ struct CalUiData {
   bool save_failed = false;
   bool awaiting_tap = false; // intro: tap screen to begin 6-step capture
 };
-

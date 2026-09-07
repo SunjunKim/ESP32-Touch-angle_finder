@@ -19,11 +19,14 @@ struct ImuState {
   float ref_az_g = 0.0f;
   float ref_angle = 0.0f;
   bool ref_valid = false;
+  uint8_t ref_normal_axis = 2;
 
   float rel_angle_deg = 0.0f;
   float abs_angle_deg = 0.0f;
 
   bool inited = false;
+  bool sample_valid=false,moving=false;
+  uint32_t sample_ms=0;
 };
 
 extern ImuState g_imu;

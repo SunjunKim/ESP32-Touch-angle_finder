@@ -3,8 +3,8 @@
 #include "rel_page.h"
 
 #include "app_hooks.h"
-#include "imu_math.h"
 #include "imu_state.h"
+#include "accel_rel.h"
 #include "pin_config.h"
 #include <cstring>
 #include <cstdio>
@@ -21,9 +21,8 @@ namespace {
 static char s_last_rel_big[64] = {0};
 static char s_last_dbg[96] = {0};
 static char s_last_zero_btn_label[40] = {0};
-
-// Idle noise on Ax/Ay slightly inflates sqrt(Ax²+Ay²); squash sub-threshold jitter.
-static constexpr float kHorizonTiltDeadbandDeg = 0.15f;
+// All accesses, including zero capture, are protected by g_imuMux.
+static accel_rel::ContactRel s_rel;
 
 static inline float round_to_step(float v, float step)
 {
@@ -92,64 +91,42 @@ lv_obj_t *rel_create_zero_button(lv_obj_t *parent)
 void rel_capture_reference_now()
 {
   portENTER_CRITICAL(&g_imuMux);
+  if(!g_imu.sample_valid||(uint32_t)(millis()-g_imu.sample_ms)>500){portEXIT_CRITICAL(&g_imuMux);return;}
+  if(!s_rel.capture()){portEXIT_CRITICAL(&g_imuMux);return;}
   g_imu.ref_ax_g = g_imu.ax_g;
   g_imu.ref_ay_g = g_imu.ay_g;
   g_imu.ref_az_g = g_imu.az_g;
-  g_imu.ref_angle = g_imu.abs_angle_deg;
-  g_imu.ref_valid =
-      (imu_math::safe_norm3(g_imu.ref_ax_g, g_imu.ref_ay_g, g_imu.ref_az_g) > 0.0f);
+  g_imu.ref_angle = s_rel.reference;
+  g_imu.ref_normal_axis = s_rel.normal_axis;
+  g_imu.abs_angle_deg = s_rel.tilt;
+  g_imu.rel_angle_deg = 0;
+  g_imu.ref_valid = true;
   portEXIT_CRITICAL(&g_imuMux);
 }
 
 void rel_update_angle_sample()
 {
   portENTER_CRITICAL(&g_imuMux);
-  const float ax = g_imu.ax_g;
-  const float ay = g_imu.ay_g;
-  const float az = g_imu.az_g;
-  const float n = imu_math::safe_norm3(ax, ay, az);
-  if (n <= 0.0f) {
-    g_imu.rel_angle_deg = 0.0f;
-    portEXIT_CRITICAL(&g_imuMux);
-    return;
+  const uint32_t now=millis();
+  const float dt=g_imu.sample_ms?(uint32_t)(now-g_imu.sample_ms)*.001f:0;
+  if(!g_imu.ref_valid)s_rel.clear_reference();
+  if(!g_imu.sample_valid)s_rel.valid=false;
+  g_imu.sample_valid=s_rel.update(g_imu.ax_g,g_imu.ay_g,g_imu.az_g,dt);
+  g_imu.moving=s_rel.moving;
+  g_imu.sample_ms=now;
+  if(g_imu.sample_valid){
+    g_imu.abs_angle_deg=s_rel.tilt;
+    g_imu.rel_angle_deg=s_rel.angle;
   }
-  const float cx = ax / n;
-  const float cy = ay / n;
-  const float cz = az / n;
-
-  // Same geometry as atan2(horiz, -nz) vs nominal down (0,0,-1), generalized: tilt angle between
-  // current gravity unit vector and the "zero" direction (captured ref, or LCD-face-up -Z).
-  float rdx, rdy, rdz;
-
-  rdx = 0.0f;
-  rdy = 0.0f;
-  rdz = -1.0f;
-
-  const float dot = cx * rdx + cy * rdy + cz * rdz;
-  const float crx = cy * rdz - cz * rdy;
-  const float cry = cz * rdx - cx * rdz;
-  const float crz = cx * rdy - cy * rdx;
-  const float cross_mag = sqrtf(crx * crx + cry * cry + crz * crz);
-  float alpha_deg = imu_math::rad2deg(atan2f(cross_mag, dot));
-
-  if (!g_imu.ref_valid && alpha_deg < kHorizonTiltDeadbandDeg) {
-    alpha_deg = 0.0f;
-  }
-
-  g_imu.abs_angle_deg = (g_imu.pitch_deg >= 0.0f) ? fabsf(alpha_deg) : -fabsf(alpha_deg);
-
-  if (g_imu.ref_valid) {
-    g_imu.rel_angle_deg = g_imu.abs_angle_deg - g_imu.ref_angle;
-  }
-  else {
-    g_imu.rel_angle_deg = g_imu.abs_angle_deg;
-  }
-
   portEXIT_CRITICAL(&g_imuMux);
 }
 
 void rel_on_tap_zero()
 {
+  portENTER_CRITICAL(&g_imuMux);
+  const bool fresh=g_imu.sample_valid&&(uint32_t)(millis()-g_imu.sample_ms)<500;
+  portEXIT_CRITICAL(&g_imuMux);
+  if(!fresh)return;
   rel_capture_reference_now();
   app_play_rel_zero_sound();
 }
@@ -201,13 +178,17 @@ void rel_update(lv_obj_t *rel_angle_big,
   if (rel_angle_big) {
     const float rel_rounded = round_to_step(imu.rel_angle_deg, 0.1f);
     char rel_big[64];
-    snprintf(rel_big, sizeof(rel_big), "%.1f°", rel_rounded);
+    if(imu.sample_valid)snprintf(rel_big, sizeof(rel_big), "%.1f°", rel_rounded);
+    else snprintf(rel_big,sizeof(rel_big),"--");
     set_label_if_changed(rel_angle_big, s_last_rel_big, sizeof(s_last_rel_big), rel_big);
+    lv_obj_set_style_text_color(rel_angle_big,imu.moving?lv_palette_main(LV_PALETTE_RED):lv_color_white(),0);
   }
 
   if (debug_label) {
     char dbg[96];
-    snprintf(dbg, sizeof(dbg), "Ref: %s", imu.ref_valid ? "SET" : "NOT SET");
+    const char axis="XYZ"[imu.ref_normal_axis<3?imu.ref_normal_axis:2];
+    if(imu.ref_valid)snprintf(dbg,sizeof(dbg),"Ref: SET / N:%c locked",axis);
+    else snprintf(dbg,sizeof(dbg),"Ref: NOT SET");
     set_label_if_changed(debug_label, s_last_dbg, sizeof(s_last_dbg), dbg);
   }
 
@@ -221,4 +202,3 @@ void rel_update(lv_obj_t *rel_angle_big,
 }
 
 } // namespace ui_pages
-
