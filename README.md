@@ -38,6 +38,11 @@ Arduino CLI와 ESP32 보드 패키지, Arduino_GFX_Library, lvgl, SensorLib 및
 라이브러리 내부 파일은 변경하지 않는다. LVGL 8/9 분기를 제공하지만 이번
 검증은 설치된 라이브러리 조합에 한정된다.
 
+0.0.2 빌드 환경: Arduino CLI 1.5.1, ESP32 core 3.3.11, LVGL 9.5.0,
+GFX Library for Arduino 1.6.7, SensorLib 0.4.1,
+Driver Bus Library Based on Arduino 1.0.1, 로컬 Mylibrary(버전 메타데이터 없음).
+Mylibrary 등 외부 의존성은 이 저장소에 포함되어 있지 않아 별도 설치가 필요하다.
+
 ```sh
 arduino-cli compile \
   --fqbn esp32:esp32:waveshare_esp32_s3_touch_lcd_169:PartitionScheme=app3M_fat9M_16MB,PSRAM=disabled \

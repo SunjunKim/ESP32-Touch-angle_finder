@@ -1,12 +1,4 @@
-// Using library Driver Bus Library Based on Arduino v1.0.1
-// Using library GFX Library for Arduino v1.6.5
-// Using library Mylibrary (legacy)
-// Using library SensorLib v0.4.0
-// Using library lvgl v8.4.0
-// Using library Networking v3.3.7
-// Using library SPI v3.3.7
-// Using library WiFi v3.3.7
-// Using library Wire v3.3.7
+// Build target and validated dependency versions are documented in README.md.
 
 #include <stdint.h>
 
@@ -125,7 +117,7 @@ static constexpr uint32_t kBacklightPwmHz = 5000;
 static constexpr uint8_t  kBacklightPwmResBits = 8; // duty 0..255
 static constexpr int      kBacklightPwmChannel = 0; // legacy cores only (kept for reference)
 
-static const char kAppVersion[] = "v0.0.1";
+static const char kAppVersion[] = "v0.0.2";
 
 static uint8_t g_backlightDuty = kBacklightFull;
 static uint32_t g_lastUserActivityMs = 0;
