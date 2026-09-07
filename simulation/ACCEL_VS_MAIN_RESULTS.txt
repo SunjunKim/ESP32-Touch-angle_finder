@@ -1,0 +1,80 @@
+beta_-15_ideal n=1318
+ MAIN MAE=1.43912 P95=7.62038 MAX=13.55476 signed=0.86432
+  beta=-15.0 central=11.0 pos=1.000 tip=45.0 shape=chef truth=12.07520 display=25.62996
+ ACC MAE=11.10568 P95=28.00002 MAX=30.00000 signed=-11.10568
+  beta=-15.0 central=30.0 pos=0.000 tip=0.0 shape=chef truth=30.00000 display=0.00000
+beta_-15_noise n=13180
+ MAIN MAE=1.45423 P95=7.57555 MAX=13.60688 signed=0.85573
+  beta=-15.0 central=11.0 pos=1.000 tip=45.0 shape=chef truth=12.07520 display=25.68209
+ ACC MAE=11.10708 P95=27.99918 MAX=29.99997 signed=-11.10633
+  beta=-15.0 central=30.0 pos=0.500 tip=0.0 shape=chef truth=30.00000 display=0.00004
+beta_-30_ideal n=1323
+ MAIN MAE=2.05015 P95=11.31046 MAX=27.15418 signed=-0.61075
+  beta=-30.0 central=22.0 pos=1.000 tip=45.0 shape=chef truth=23.59503 display=50.74921
+ ACC MAE=1.86773 P95=10.85046 MAX=21.45931 signed=-1.86773
+  beta=-30.0 central=28.0 pos=0.751 tip=45.0 shape=tanto truth=29.54633 display=8.08702
+beta_-30_noise n=13230
+ MAIN MAE=2.06353 P95=11.32606 MAX=27.19217 signed=-0.61820
+  beta=-30.0 central=22.0 pos=1.000 tip=45.0 shape=chef truth=23.59503 display=50.78720
+ ACC MAE=1.87066 P95=10.84281 MAX=21.46675 signed=-1.86800
+  beta=-30.0 central=28.0 pos=1.000 tip=45.0 shape=chef truth=29.54633 display=8.07958
+beta_-7_ideal n=1314
+ MAIN MAE=0.48981 P95=2.72954 MAX=4.93769 signed=0.48981
+  beta=-7.0 central=7.0 pos=1.000 tip=45.0 shape=chef truth=7.72288 display=12.66057
+ ACC MAE=11.64534 P95=14.00002 MAX=14.00002 signed=-11.64534
+  beta=-7.0 central=25.0 pos=0.749 tip=0.0 shape=chef truth=25.00001 display=10.99999
+beta_-7_noise n=13140
+ MAIN MAE=0.50569 P95=2.70640 MAX=6.41502 signed=0.48769
+  beta=-7.0 central=7.0 pos=0.751 tip=45.0 shape=tanto truth=7.72288 display=1.30786
+ ACC MAE=11.64602 P95=14.00657 MAX=14.01470 signed=-11.64602
+  beta=-7.0 central=30.0 pos=1.000 tip=0.0 shape=chef truth=30.00000 display=15.98530
+blade_level_ideal n=1309
+ MAIN MAE=0.00000 P95=0.00000 MAX=0.00001 signed=-0.00000
+  beta=0.0 central=23.0 pos=0.875 tip=45.0 shape=chef truth=24.65000 display=24.65000
+ ACC MAE=0.00001 P95=0.00002 MAX=0.00002 signed=-0.00001
+  beta=0.0 central=23.0 pos=0.875 tip=45.0 shape=chef truth=24.65000 display=24.64998
+blade_level_noise n=13090
+ MAIN MAE=0.01861 P95=0.04761 MAX=0.07774 signed=-0.00009
+  beta=0.0 central=18.0 pos=0.000 tip=0.0 shape=chef truth=18.00000 display=17.92226
+ ACC MAE=0.03392 P95=0.04149 MAX=0.04936 signed=-0.03392
+  beta=0.0 central=8.0 pos=0.000 tip=0.0 shape=chef truth=8.00000 display=7.95064
+reverse_blade_level n=192
+ MAIN MAE=0.00000 P95=0.00000 MAX=0.00000 signed=0.00000
+  beta=0.0 central=17.0 pos=0.500 tip=0.0 shape=chef truth=17.00000 display=17.00000
+ ACC MAE=0.00000 P95=0.00000 MAX=0.00000 signed=0.00000
+  beta=0.0 central=17.0 pos=0.500 tip=0.0 shape=chef truth=17.00000 display=17.00000
+reverse_both_tilted n=576
+ MAIN MAE=0.00000 P95=0.00000 MAX=0.00001 signed=0.00000
+  beta=-30.0 central=8.0 pos=0.500 tip=0.0 shape=chef truth=8.00000 display=8.00001
+ ACC MAE=7.22223 P95=24.00001 MAX=30.00000 signed=-7.22223
+  beta=-15.0 central=30.0 pos=0.500 tip=0.0 shape=chef truth=30.00000 display=0.00000
+reverse_stone_level n=192
+ MAIN MAE=0.00000 P95=0.00000 MAX=0.00000 signed=-0.00000
+  beta=-20.0 central=20.0 pos=0.500 tip=30.0 shape=tanto truth=20.00000 display=20.00000
+ ACC MAE=0.00001 P95=0.00002 MAX=0.00002 signed=-0.00001
+  beta=-17.0 central=17.0 pos=0.500 tip=0.0 shape=chef truth=17.00000 display=16.99998
+same_plane_yaw n=1440
+ MAIN MAE=13.00000 P95=60.00000 MAX=60.00000 signed=13.00000
+  tilt=30.000000 yaw=90 truth=0.00000 display=60.00000
+ ACC MAE=0.00000 P95=0.00000 MAX=0.00000 signed=0.00000
+  tilt=0.000000 yaw=0 truth=0.00000 display=0.00000
+stone_level_at_center_ideal n=1318
+ MAIN MAE=2.95934 P95=13.31047 MAX=19.71670 signed=2.95934
+  beta=-28.0 central=28.0 pos=1.000 tip=45.0 shape=chef truth=29.57208 display=49.28878
+ ACC MAE=3.04093 P95=13.82132 MAX=22.86086 signed=-3.04093
+  beta=-28.0 central=28.0 pos=1.000 tip=45.0 shape=chef truth=29.57208 display=6.71121
+stone_level_at_center_noise n=13180
+ MAIN MAE=2.97509 P95=13.16420 MAX=22.93278 signed=2.72312
+  beta=-28.0 central=28.0 pos=0.751 tip=45.0 shape=tanto truth=29.57208 display=6.63929
+ ACC MAE=3.06001 P95=13.80421 MAX=22.86851 signed=-3.06001
+  beta=-28.0 central=28.0 pos=1.000 tip=45.0 shape=chef truth=29.57208 display=6.70357
+sweep_measure_blade n=48
+ MAIN MAE=0.00000 P95=0.00000 MAX=0.00000 signed=0.00000
+  angle=17.000000 truth=17.00000 display=17.00000
+ ACC MAE=0.00001 P95=0.00002 MAX=0.00002 signed=-0.00001
+  angle=17.000000 truth=17.00000 display=16.99998
+sweep_measure_stone n=48
+ MAIN MAE=0.00000 P95=0.00000 MAX=0.00000 signed=0.00000
+  angle=17.000000 truth=17.00000 display=17.00000
+ ACC MAE=0.00001 P95=0.00002 MAX=0.00002 signed=-0.00001
+  angle=17.000000 truth=17.00000 display=16.99998

@@ -1,0 +1,33 @@
+{"elapsed_s": 0.0004, "line": "1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 0.0005, "line": "REL_CONTACT A=0.977805,-0.014878,-0.009327 tilt=1.0288 ref=1.2583 angle=0.2309 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 0.0005, "line": "REL_CONTACT A=0.978174,-0.014943,-0.009026 tilt=1.0224 ref=1.2583 angle=0.2362 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 0.9276, "line": "REL_CONTACT A=0.978542,-0.015560,-0.008422 tilt=1.0358 ref=1.2583 angle=0.2219 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 1.9304, "line": "REL_CONTACT A=0.978113,-0.015495,-0.008541 tilt=1.0363 ref=1.2583 angle=0.2239 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 2.9442, "line": "REL_CONTACT A=0.978053,-0.015619,-0.008297 tilt=1.0359 ref=1.2583 angle=0.2155 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 3.9486, "line": "REL_CONTACT A=0.978358,-0.015988,-0.008180 tilt=1.0516 ref=1.2583 angle=0.2067 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 4.9613, "line": "REL_CONTACT A=0.978236,-0.016111,-0.007997 tilt=1.0533 ref=1.2583 angle=0.2073 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 5.9752, "line": "REL_CONTACT A=0.978362,-0.015745,-0.007874 tilt=1.0308 ref=1.2583 angle=0.2197 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 6.9785, "line": "REL_CONTACT A=0.978053,-0.016232,-0.007874 tilt=1.0568 ref=1.2583 angle=0.2030 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 7.992, "line": "REL_CONTACT A=0.978177,-0.015989,-0.007874 tilt=1.0438 ref=1.2583 angle=0.2096 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 8.9959, "line": "REL_CONTACT A=0.978238,-0.016112,-0.007753 tilt=1.0471 ref=1.2583 angle=0.2112 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 10.0034, "line": "REL_CONTACT A=0.978545,-0.015992,-0.007633 tilt=1.0374 ref=1.2583 angle=0.2105 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 11.0159, "line": "REL_CONTACT A=0.978175,-0.016417,-0.007815 tilt=1.0649 ref=1.2583 angle=0.2051 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 12.0198, "line": "REL_CONTACT A=0.978297,-0.016725,-0.007513 tilt=1.0737 ref=1.2583 angle=0.1840 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 13.0328, "line": "REL_CONTACT A=0.978237,-0.016664,-0.007390 tilt=1.0676 ref=1.2583 angle=0.1934 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 14.0368, "line": "REL_CONTACT A=0.978117,-0.016603,-0.007206 tilt=1.0601 ref=1.2583 angle=0.2020 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 15.0397, "line": "REL_CONTACT A=0.978178,-0.016604,-0.007207 tilt=1.0601 ref=1.2583 angle=0.1912 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 16.054, "line": "REL_CONTACT A=0.978239,-0.016543,-0.007207 tilt=1.0568 ref=1.2583 angle=0.2041 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 17.0657, "line": "REL_CONTACT A=0.978052,-0.016723,-0.007633 tilt=1.0768 ref=1.2583 angle=0.1859 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 18.0796, "line": "REL_CONTACT A=0.978357,-0.018198,-0.006608 tilt=1.1337 ref=1.2583 angle=0.1444 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 19.0929, "line": "REL_CONTACT A=0.979076,-0.023166,-0.004752 tilt=1.3836 ref=1.2583 angle=0.1703 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 20.1045, "line": "REL_CONTACT A=0.979262,-0.024090,-0.003723 tilt=1.4259 ref=1.2583 angle=0.1574 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 21.1094, "line": "REL_CONTACT A=0.979381,-0.024518,-0.003848 tilt=1.4516 ref=1.2583 angle=0.1870 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 22.1249, "line": "REL_CONTACT A=0.979322,-0.024519,-0.003543 tilt=1.4491 ref=1.2583 angle=0.1875 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 23.1384, "line": "REL_CONTACT A=0.978955,-0.024272,-0.003721 tilt=1.4369 ref=1.2583 angle=0.1790 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 24.1413, "line": "REL_CONTACT A=0.979379,-0.024455,-0.004091 tilt=1.4503 ref=1.2583 angle=0.1849 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 25.1546, "line": "REL_CONTACT A=0.978892,-0.024147,-0.004025 tilt=1.4326 ref=1.2583 angle=0.1788 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 26.1682, "line": "REL_CONTACT A=0.979074,-0.024147,-0.004270 tilt=1.4347 ref=1.2583 angle=0.1803 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 27.1716, "line": "REL_CONTACT A=0.978954,-0.024148,-0.003903 tilt=1.4314 ref=1.2583 angle=0.1684 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 28.1863, "line": "REL_CONTACT A=0.979383,-0.023721,-0.004209 tilt=1.4091 ref=1.2583 angle=0.1520 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 29.1881, "line": "REL_CONTACT A=0.978955,-0.023842,-0.004024 tilt=1.4148 ref=1.2583 angle=0.1536 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 30.2024, "partial": "REL_CONTACT A=0.978832,-0.023841,-0.004084 tilt=1.4156 ref=1.258"}

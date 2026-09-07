@@ -1,0 +1,60 @@
+beta-15/current n=1318
+ result MAE=1.43912 P95=7.62038 MAX=13.55476 signed=0.86432
+  beta=-15 central=11 pos=1.000 tip=45 chef truth=12.07520 display=25.62996
+beta-15/normal n=1318
+ result MAE=1.07258 P95=4.41437 MAX=6.88032 signed=0.88615
+  beta=-15 central=7 pos=1.000 tip=45 chef truth=7.72679 display=14.60712
+beta-15/pitch n=1318
+ result MAE=0.66161 P95=2.54560 MAX=3.39034 signed=0.30050
+  beta=-15 central=28 pos=1.000 tip=45 chef truth=29.86621 display=33.25655
+beta-15/xz n=1318
+ result MAE=0.66919 P95=2.59721 MAX=3.77280 signed=0.32234
+  beta=-15 central=28 pos=1.000 tip=45 chef truth=29.86621 display=33.63901
+beta-30/current n=1323
+ result MAE=2.05015 P95=11.31046 MAX=27.15418 signed=-0.61075
+  beta=-30 central=22 pos=1.000 tip=45 chef truth=23.59503 display=50.74921
+beta-30/normal n=1323
+ result MAE=2.71443 P95=8.98077 MAX=13.11190 signed=2.71443
+  beta=-30 central=7 pos=1.000 tip=45 chef truth=7.80034 display=20.91224
+beta-30/pitch n=1323
+ result MAE=1.33565 P95=5.13118 MAX=7.04379 signed=1.30602
+  beta=-30 central=28 pos=1.000 tip=45 chef truth=29.54633 display=36.59012
+beta-30/xz n=1323
+ result MAE=1.24978 P95=4.83894 MAX=7.50551 signed=1.20504
+  beta=-30 central=28 pos=1.000 tip=45 chef truth=29.54633 display=37.05184
+beta-7/current n=1314
+ result MAE=0.48981 P95=2.72954 MAX=4.93769 signed=0.48981
+  beta=-7 central=7 pos=1.000 tip=45 chef truth=7.72288 display=12.66057
+beta-7/normal n=1314
+ result MAE=0.44719 P95=1.75202 MAX=2.80612 signed=0.22836
+  beta=-7 central=7 pos=1.000 tip=45 chef truth=7.72288 display=10.52900
+beta-7/pitch n=1314
+ result MAE=0.53943 P95=2.15119 MAX=2.77737 signed=-0.22400
+  beta=-7 central=27 pos=0.751 tip=45 tanto truth=29.11992 display=26.34256
+beta-7/xz n=1314
+ result MAE=0.51537 P95=1.97836 MAX=2.30536 signed=-0.18344
+  beta=-7 central=30 pos=0.000 tip=0 chef truth=30.00000 display=27.69464
+level/current n=1309
+ result MAE=0.00000 P95=0.00000 MAX=0.00001 signed=0.00000
+  beta=0 central=23 pos=0.875 tip=45 chef truth=24.65000 display=24.65000
+level/normal n=1309
+ result MAE=0.00000 P95=0.00000 MAX=0.00001 signed=0.00000
+  beta=0 central=23 pos=0.875 tip=45 chef truth=24.65000 display=24.65000
+level/pitch n=1309
+ result MAE=0.65531 P95=2.80788 MAX=3.25497 signed=-0.65531
+  beta=0 central=27 pos=0.751 tip=45 tanto truth=29.41998 display=26.16500
+level/xz n=1309
+ result MAE=0.57629 P95=2.38863 MAX=2.56956 signed=-0.57629
+  beta=0 central=27 pos=0.751 tip=45 tanto truth=29.41998 display=26.85041
+stone_level_center/current n=1318
+ result MAE=2.95934 P95=13.31047 MAX=19.71670 signed=2.95934
+  beta=-28 central=28 pos=1.000 tip=45 chef truth=29.57208 display=49.28878
+stone_level_center/normal n=1318
+ result MAE=1.13755 P95=5.62932 MAX=11.65323 signed=1.13755
+  beta=-28 central=28 pos=1.000 tip=45 chef truth=29.57208 display=41.22530
+stone_level_center/pitch n=1318
+ result MAE=0.59087 P95=2.93461 MAX=6.57284 signed=0.54576
+  beta=-28 central=28 pos=1.000 tip=45 chef truth=29.57208 display=36.14491
+stone_level_center/xz n=1318
+ result MAE=0.60331 P95=3.03158 MAX=7.07369 signed=0.55823
+  beta=-28 central=28 pos=1.000 tip=45 chef truth=29.57208 display=36.64577

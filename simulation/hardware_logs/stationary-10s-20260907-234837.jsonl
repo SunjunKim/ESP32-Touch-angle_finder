@@ -1,0 +1,15 @@
+{"elapsed_s": 0.0003, "line": "le=0.1731 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 0.0004, "line": "REL_CONTACT A=0.979445,-0.023783,-0.004027 tilt=1.4108 ref=1.2583 angle=0.1610 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 0.0005, "line": "REL_CONTACT A=0.979321,-0.023659,-0.004269 tilt=1.4063 ref=1.2583 angle=0.1606 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 0.0005, "line": "REL_CONTACT A=0.979014,-0.024148,-0.004087 tilt=1.4330 ref=1.2583 angle=0.1763 set=1 valid=1 moving=0 normal=0 gyro=off"}
+{"elapsed_s": 0.0005, "line": "REL_CONTACT A=0.190162,-0.489761,-0.761306 tilt=34.6099 ref=2.3029 angle=25.7991 set=1 valid=1 moving=1 normal=2 gyro=off"}
+{"elapsed_s": 1.0006, "line": "REL_CONTACT A=-0.029964,-0.065207,-1.002182 tilt=4.0957 ref=2.3029 angle=3.0771 set=1 valid=1 moving=1 normal=2 gyro=off"}
+{"elapsed_s": 2.0048, "line": "REL_CONTACT A=-0.027626,-0.031531,-1.001642 tilt=2.3966 ref=2.3029 angle=0.3519 set=1 valid=1 moving=1 normal=2 gyro=off"}
+{"elapsed_s": 3.0107, "line": "REL_CONTACT A=0.033983,-0.042796,-1.018726 tilt=3.0706 ref=2.3029 angle=1.5773 set=1 valid=1 moving=1 normal=2 gyro=off"}
+{"elapsed_s": 4.0136, "line": "REL_CONTACT A=-0.000027,-0.521985,-0.891948 tilt=30.3370 ref=2.3029 angle=35.9867 set=1 valid=1 moving=1 normal=2 gyro=off"}
+{"elapsed_s": 5.0272, "line": "REL_CONTACT A=-0.015176,-0.037659,-1.001217 tilt=2.3222 ref=2.3029 angle=1.2015 set=1 valid=1 moving=1 normal=2 gyro=off"}
+{"elapsed_s": 6.0302, "line": "REL_CONTACT A=-0.024676,0.002695,-1.001589 tilt=1.4197 ref=2.3029 angle=0.9256 set=1 valid=1 moving=0 normal=2 gyro=off"}
+{"elapsed_s": 7.0436, "line": "REL_CONTACT A=-0.025227,0.002637,-1.001586 tilt=1.4507 ref=2.3029 angle=0.8723 set=1 valid=1 moving=0 normal=2 gyro=off"}
+{"elapsed_s": 8.0564, "line": "REL_CONTACT A=-0.024919,0.002695,-1.001405 tilt=1.4338 ref=2.3029 angle=0.8856 set=1 valid=1 moving=0 normal=2 gyro=off"}
+{"elapsed_s": 9.0589, "line": "REL_CONTACT A=-0.024312,0.002019,-1.001474 tilt=1.3954 ref=2.3029 angle=0.8876 set=1 valid=1 moving=0 normal=2 gyro=off"}
+{"elapsed_s": 10.0723, "line": "REL_CONTACT A=-0.024312,0.002326,-1.001655 tilt=1.3967 ref=2.3029 angle=0.9065 set=1 valid=1 moving=0 normal=2 gyro=off"}
