@@ -319,8 +319,12 @@ static void power_sleep_manager()
   }
 }
 
+#if LVGL_VERSION_MAJOR >= 9
+static uint16_t buf[LCD_WIDTH * LCD_HEIGHT / 10];
+#else
 static lv_disp_draw_buf_t draw_buf;
 static lv_color_t buf[LCD_WIDTH * LCD_HEIGHT / 10];
+#endif
 
 Arduino_DataBus *bus = new Arduino_ESP32SPI(LCD_DC, LCD_CS, LCD_SCK, LCD_MOSI);
 Arduino_GFX *gfx = new Arduino_ST7789(
@@ -344,15 +348,19 @@ static void my_print(const char *buf)
 }
 #endif
 
+#if LVGL_VERSION_MAJOR >= 9
+static void my_disp_flush(lv_display_t *disp, const lv_area_t *area, uint8_t *color_p)
+#else
 static void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p)
+#endif
 {
   const uint32_t w = (area->x2 - area->x1 + 1);
   const uint32_t h = (area->y2 - area->y1 + 1);
 
 #if (LV_COLOR_16_SWAP != 0)
-  gfx->draw16bitBeRGBBitmap(area->x1, area->y1, (uint16_t *)&color_p->full, w, h);
+  gfx->draw16bitBeRGBBitmap(area->x1, area->y1, (uint16_t *)color_p, w, h);
 #else
-  gfx->draw16bitRGBBitmap(area->x1, area->y1, (uint16_t *)&color_p->full, w, h);
+  gfx->draw16bitRGBBitmap(area->x1, area->y1, (uint16_t *)color_p, w, h);
 #endif
 
   lv_disp_flush_ready(disp);
@@ -466,7 +474,11 @@ static void Arduino_IIC_Touch_Interrupt(void)
   CST816T->IIC_Interrupt_Flag = true;
 }
 
-static void my_touchpad_read(lv_indev_drv_t * /*indev_driver*/, lv_indev_data_t *data)
+#if LVGL_VERSION_MAJOR >= 9
+static void my_touchpad_read(lv_indev_t *, lv_indev_data_t *data)
+#else
+static void my_touchpad_read(lv_indev_drv_t *, lv_indev_data_t *data)
+#endif
 {
   const bool screenAsleep = (g_backlightDuty == kBacklightOff);
 
@@ -1068,6 +1080,15 @@ static void setup_lvgl()
   lv_log_register_print_cb(my_print);
 #endif
 
+#if LVGL_VERSION_MAJOR >= 9
+  lv_display_t *disp=lv_display_create(LCD_WIDTH,LCD_HEIGHT);
+  lv_display_set_color_format(disp,LV_COLOR_FORMAT_RGB565);
+  lv_display_set_flush_cb(disp,my_disp_flush);
+  lv_display_set_buffers(disp,buf,nullptr,sizeof(buf),LV_DISPLAY_RENDER_MODE_PARTIAL);
+  lv_indev_t *indev=lv_indev_create();
+  lv_indev_set_type(indev,LV_INDEV_TYPE_POINTER);
+  lv_indev_set_read_cb(indev,my_touchpad_read);
+#else
   lv_disp_draw_buf_init(&draw_buf, buf, NULL, LCD_WIDTH * LCD_HEIGHT / 10);
 
   static lv_disp_drv_t disp_drv;
@@ -1084,6 +1105,7 @@ static void setup_lvgl()
   indev_drv.type = LV_INDEV_TYPE_POINTER;
   indev_drv.read_cb = my_touchpad_read;
   lv_indev_drv_register(&indev_drv);
+#endif
 
   const esp_timer_create_args_t lvgl_tick_timer_args = {
     .callback = &lvgl_tick_cb,
