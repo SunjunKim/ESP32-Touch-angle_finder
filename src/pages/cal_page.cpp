@@ -60,6 +60,12 @@ static void save_accel_cal_prefs()
     key[1] = (char)('0' + i);
     p.putFloat(key, s_accR[i]);
   }
+  // Compatibility with the diagnostic firmware's atomic calibration record.
+  float blob[15];
+  memcpy(blob,s_accBias,3*sizeof(float));
+  memcpy(blob+3,s_accScale,3*sizeof(float));
+  memcpy(blob+6,s_accR,9*sizeof(float));
+  p.putBytes("data_v3",blob,sizeof(blob));
   p.end();
 }
 
@@ -488,6 +494,22 @@ bool cal_load_accel_prefs()
   Preferences p;
   if (!p.begin(kAccCalPrefsNs, true)) {
     return false;
+  }
+  if(p.getBytesLength("data_v3")==15*sizeof(float)) {
+    float blob[15]{};
+    bool valid=p.getBytes("data_v3",blob,sizeof(blob))==sizeof(blob);
+    for(float v:blob)valid=valid&&isfinite(v);
+    for(int i=3;i<6;++i)valid=valid&&fabsf(blob[i])>.5f&&fabsf(blob[i])<2;
+    for(int i=0;i<3;++i)for(int j=0;j<3;++j){
+      float dot=0;for(int k=0;k<3;++k)dot+=blob[6+i*3+k]*blob[6+j*3+k];
+      valid=valid&&fabsf(dot-(i==j?1.0f:0.0f))<.03f;
+    }
+    if(valid){
+      memcpy(s_accBias,blob,3*sizeof(float));
+      memcpy(s_accScale,blob+3,3*sizeof(float));
+      memcpy(s_accR,blob+6,9*sizeof(float));
+      p.end();s_accCalValid=true;return true;
+    }
   }
   const bool ok = p.getBool("ok", false);
   if (!ok) {
