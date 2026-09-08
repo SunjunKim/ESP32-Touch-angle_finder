@@ -10,7 +10,7 @@ const lv_font_t *rel_angle_font();
 lv_obj_t *rel_create_angle_label(lv_obj_t *parent);
 lv_obj_t *rel_create_zero_button(lv_obj_t *parent);
 
-void rel_capture_reference_now();
+bool rel_capture_reference_now();
 // Uses g_imu.ax_g / ay_g / az_g (calibrated device frame) under the same mutex as ref_*.
 void rel_update_angle_sample();
 void rel_on_tap_zero();

@@ -13,6 +13,10 @@ static void gravity(float *v,unsigned normal,float polarity,float tilt,float hea
 static bool sample(accel_rel::ContactRel &f,const float *v,float dt=1){
   return f.update(v[0],v[1],v[2],dt);
 }
+static bool settle_and_capture(accel_rel::ContactRel &f, const float *v) {
+  for (int i = 0; i < 80; ++i) assert(sample(f, v, .008f));
+  return f.capture();
+}
 int main(){
   unsigned count=0;
   for(unsigned axis=0;axis<3;axis++)for(float polarity:{-1.f,1.f})
@@ -22,7 +26,7 @@ int main(){
           float a[3],b[3];gravity(a,axis,polarity,beta,heading);
           gravity(b,axis,polarity,beta+angle,heading);
           accel_rel::ContactRel f;
-          assert(sample(f,reverse?b:a));assert(f.capture());
+          assert(settle_and_capture(f,reverse?b:a));
           assert(f.angle==0&&f.normal_axis==axis);
           // Jump directly across horizontal without sampling the crossing.
           assert(sample(f,reverse?a:b));
@@ -31,7 +35,7 @@ int main(){
         }
   for(unsigned axis=0;axis<3;axis++){
     float v[3];gravity(v,axis,1,0);accel_rel::ContactRel f;
-    assert(sample(f,v)&&f.capture());
+    assert(settle_and_capture(f,v));
     for(int heading=0;heading<360;heading++){
       gravity(v,axis,1,65,heading);assert(sample(f,v));
       assert(f.normal_axis==axis&&std::fabs(f.angle-65)<.0001f);
@@ -41,7 +45,7 @@ int main(){
     assert(f.has_reference&&f.normal_axis==axis);
     gravity(v,axis,1,20);assert(sample(f,v));assert(std::fabs(f.angle-20)<.0001f);
     // Re-zero is the ONLY operation that selects a new contact normal.
-    gravity(v,(axis+1)%3,1,0);assert(sample(f,v)&&f.capture());
+    gravity(v,(axis+1)%3,1,0);assert(settle_and_capture(f,v));
     assert(f.normal_axis==(axis+1)%3&&f.angle==0);
     f.clear_reference();assert(!f.has_reference&&!f.valid);
   }
@@ -54,14 +58,14 @@ int main(){
       for(unsigned axis=0;axis<3;axis++){
         accel_rel::ContactRel mounted;float r[3],g[3];
         gravity(r,axis,1,beta,30);gravity(g,axis,1,tilt,yaw);
-        assert(sample(mounted,r)&&mounted.capture());assert(sample(mounted,g));
+        assert(settle_and_capture(mounted,r));assert(sample(mounted,g));
         if(axis==0)expected=mounted.angle;
         else assert(std::fabs(mounted.angle-expected)<.0001f);
         mount_cases++;
       }
     }
   accel_rel::ContactRel f;float v[3];gravity(v,0,1,-10);
-  assert(sample(f,v)&&f.capture());gravity(v,0,1,10);
+  assert(settle_and_capture(f,v));gravity(v,0,1,10);
   for(int i=0;i<60;i++)assert(sample(f,v,.01f));
   assert(std::fabs(f.angle-20)<.4f);
   for(int i=0;i<1000;i++)assert(sample(f,v,.01f));

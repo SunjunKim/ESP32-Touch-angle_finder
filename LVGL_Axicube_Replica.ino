@@ -659,6 +659,14 @@ static void imu_task(void * /*param*/)
     portEXIT_CRITICAL(&g_imuMux);
 
     ui_pages::rel_update_angle_sample();
+    // Use the same motion flag as the red angle indicator to wake the screen
+    // and refresh inactivity timers, including small angle changes.
+    portENTER_CRITICAL(&g_imuMux);
+    const bool angleMoving = g_imu.moving;
+    portEXIT_CRITICAL(&g_imuMux);
+    if (angleMoving) {
+      mark_motion_activity();
+    }
 #if AXICUBE_REL_DIAGNOSTICS
     static uint32_t diag_ms=0;
     if(USBSerial&&(uint32_t)(millis()-diag_ms)>=1000){

@@ -15,6 +15,7 @@ LV_FONT_DECLARE(lv_font_roboto_mono_48);
 namespace ui_pages {
 
 static constexpr uint32_t kRelZeroHoldMs = 3000;
+static constexpr uint32_t kRelZeroMaxSampleAgeMs = 50;
 
 namespace {
 
@@ -23,6 +24,8 @@ static char s_last_dbg[96] = {0};
 static char s_last_zero_btn_label[40] = {0};
 // All accesses, including zero capture, are protected by g_imuMux.
 static accel_rel::ContactRel s_rel;
+// UI task only: failed captures keep the previous reference and show a retry hint.
+static bool s_zero_retry = false;
 
 static inline float round_to_step(float v, float step)
 {
@@ -88,20 +91,22 @@ lv_obj_t *rel_create_zero_button(lv_obj_t *parent)
   return btn;
 }
 
-void rel_capture_reference_now()
+bool rel_capture_reference_now()
 {
   portENTER_CRITICAL(&g_imuMux);
-  if(!g_imu.sample_valid||(uint32_t)(millis()-g_imu.sample_ms)>500){portEXIT_CRITICAL(&g_imuMux);return;}
-  if(!s_rel.capture()){portEXIT_CRITICAL(&g_imuMux);return;}
-  g_imu.ref_ax_g = g_imu.ax_g;
-  g_imu.ref_ay_g = g_imu.ay_g;
-  g_imu.ref_az_g = g_imu.az_g;
+  if(!g_imu.sample_valid||(uint32_t)(millis()-g_imu.sample_ms)>kRelZeroMaxSampleAgeMs){portEXIT_CRITICAL(&g_imuMux);return false;}
+  float average[3];
+  if(!s_rel.capture(average)){portEXIT_CRITICAL(&g_imuMux);return false;}
+  g_imu.ref_ax_g = average[0];
+  g_imu.ref_ay_g = average[1];
+  g_imu.ref_az_g = average[2];
   g_imu.ref_angle = s_rel.reference;
   g_imu.ref_normal_axis = s_rel.normal_axis;
   g_imu.abs_angle_deg = s_rel.tilt;
   g_imu.rel_angle_deg = 0;
   g_imu.ref_valid = true;
   portEXIT_CRITICAL(&g_imuMux);
+  return true;
 }
 
 void rel_update_angle_sample()
@@ -123,12 +128,9 @@ void rel_update_angle_sample()
 
 void rel_on_tap_zero()
 {
-  portENTER_CRITICAL(&g_imuMux);
-  const bool fresh=g_imu.sample_valid&&(uint32_t)(millis()-g_imu.sample_ms)<500;
-  portEXIT_CRITICAL(&g_imuMux);
-  if(!fresh)return;
-  rel_capture_reference_now();
-  app_play_rel_zero_sound();
+  s_zero_retry = !rel_capture_reference_now();
+  if (s_zero_retry) app_start_tone(220, 150);
+  else app_play_rel_zero_sound();
 }
 
 static void rel_zero_btn_event_cb(lv_event_t *e)
@@ -194,7 +196,7 @@ void rel_update(lv_obj_t *rel_angle_big,
 
   if (rel_zero_btn) {
     lv_obj_t *btn_label = lv_obj_get_child(rel_zero_btn, 0);
-    const char *zero_caption =
+    const char *zero_caption = s_zero_retry ? "Keep still\nHold 3s again" :
         imu.ref_valid ? "Reset zero" : "Hold 3s to set zero";
     set_label_if_changed(btn_label, s_last_zero_btn_label,
                          sizeof(s_last_zero_btn_label), zero_caption);

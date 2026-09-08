@@ -29,6 +29,53 @@ class Filter {
   }
 };
 
+// Recent stationary window used only for zero capture. Time and sample count
+// both matter: a single sample following a gap cannot establish a stable zero.
+class ZeroWindow {
+ public:
+  void reset() { count_ = next_ = 0; }
+  void update(float x, float y, float z, float dt) {
+    const float n = std::sqrt(x*x + y*y + z*z);
+    if (!std::isfinite(n) || std::fabs(n - 1.0f) > .05f ||
+        !std::isfinite(dt) || dt <= 0 || dt > .05f) {
+      reset();
+      return;
+    }
+    const float v[3] = {x/n, y/n, z/n};
+    // Limit the entire window's vector spread, including gradual motion.
+    for (unsigned k = 0; k < 3; ++k) {
+      float lo = v[k], hi = v[k];
+      for (unsigned i = 0; i < count_; ++i) {
+        lo = std::fmin(lo, samples_[i][k]);
+        hi = std::fmax(hi, samples_[i][k]);
+      }
+      if (hi - lo > .008f) { reset(); break; }
+    }
+    for (unsigned k = 0; k < 3; ++k) samples_[next_][k] = v[k];
+    intervals_[next_] = dt;
+    next_ = (next_ + 1) % kCapacity;
+    if (count_ < kCapacity) ++count_;
+  }
+  bool mean(float out[3]) const {
+    if (count_ < 32) return false;
+    const unsigned oldest = count_ == kCapacity ? next_ : 0;
+    float span = 0;
+    for (unsigned i = 0; i < count_; ++i)
+      if (i != oldest) span += intervals_[i];
+    if (span < .5f) return false;
+    for (unsigned k = 0; k < 3; ++k) {
+      out[k] = 0;
+      for (unsigned i = 0; i < count_; ++i) out[k] += samples_[i][k];
+      out[k] /= count_;
+    }
+    return true;
+  }
+ private:
+  static constexpr unsigned kCapacity = 80; // ~0.64 sec at the production 125 Hz.
+  float samples_[kCapacity][3] = {}, intervals_[kCapacity] = {};
+  unsigned count_ = 0, next_ = 0;
+};
+
 // Active REL estimator. Legacy helpers above remain for historical comparisons.
 // The contact normal is chosen ONLY at zero. A signed inclination branch is
 // supplied by the reference's in-plane gravity direction, not by gyro history.
@@ -41,23 +88,27 @@ class ContactRel {
   unsigned normal_axis=2;
 
   void clear_reference(){
-    if(has_reference){valid=false;angle=reference=0;}
+    if(has_reference){valid=false;angle=reference=0;zero_.reset();}
     has_reference=false;normal_axis=2;
   }
 
-  bool capture(){
-    if(!valid)return false;
+  bool capture(float *captured = nullptr){
+    float average[3];
+    if(!valid || !zero_.mean(average))return false;
     normal_axis=0;
     for(unsigned i=1;i<3;i++)
-      if(std::fabs(sample_[i])>std::fabs(sample_[normal_axis]))normal_axis=i;
-    for(unsigned i=0;i<3;i++)direction_[i]=i==normal_axis?0:sample_[i];
-    reference=inclination_of(sample_);
+      if(std::fabs(average[i])>std::fabs(average[normal_axis]))normal_axis=i;
+    for(unsigned i=0;i<3;i++)direction_[i]=i==normal_axis?0:average[i];
+    reference=inclination_of(average);
     has_reference=true;
+    if (captured) for (unsigned i = 0; i < 3; ++i) captured[i] = average[i];
     tilt=reference;angle=0;
     return true;
   }
 
   bool update(float x,float y,float z,float dt){
+    if (!valid) zero_.reset();
+    zero_.update(x, y, z, dt);
     const float n=std::sqrt(x*x+y*y+z*z);
     if(!std::isfinite(n)||n<.1f){valid=false;moving=false;return false;}
     sample_[0]=x/n;sample_[1]=y/n;sample_[2]=z/n;
@@ -80,6 +131,7 @@ class ContactRel {
   }
 
  private:
+  ZeroWindow zero_;
   float sample_[3]={0,0,1},direction_[3]={0,0,0};
   float inclination_of(const float *v)const{
     const unsigned a=(normal_axis+1)%3,b=(normal_axis+2)%3;
