@@ -76,6 +76,28 @@ bash tests/run_host_tests.sh
 수집한다. 기존 로그처럼 초기 버퍼 데이터가 포함될 수 있으므로 분석에서 제외한다.
 업로드는 별도로 수행하며 보정값 초기화/전체 플래시 삭제는 하지 않는다.
 
+## Windows / macOS 자동 업데이트
+
+일반 사용자에게는 **Python 설치가 필요 없는 사전 컴파일 ZIP**을 사용한다.
+`dist/axicube-0.0.2-windows-amd64.zip`, `dist/axicube-0.0.2-macos-arm64.zip`,
+`dist/axicube-0.0.2-macos-amd64.zip`을 생성하는 개발자 도구는
+`tools/package_native.py`다. 압축 해제 후 Windows `update.cmd`, macOS
+`bash update.command`를 실행한다. 자세한 내용은 [배포 안내](tools/NATIVE_RELEASE.md)를 참조한다.
+소스에서 빌드하는 아래 경로는 개발자용이다.
+
+[업데이트 스크립트 사용법](tools/README.md)을 참조한다. Python 3.9 이상과
+Arduino CLI(또는 Arduino IDE 2에 포함된 CLI), ESP32 core가 필요하다.
+
+```sh
+# macOS: 대상 탐색 → 확인 → 빌드 → 자동 다운로드 모드 → 업로드 → 리셋
+bash tools/update-macos.command
+# 탐색만 수행: 장치를 리셋하지 않음
+bash tools/update-macos.command --list
+```
+
+Windows 터미널에서는 `tools\update-windows.cmd`를 실행한다.
+USB 후보가 여러 개면 포트 또는 일련번호를 지정해야 한다.
+
 ## 검증 및 개발 기록
 
 - 활성 REL 회귀: `tests/contact_rel_test.cpp`의 중앙 23,808 자세와

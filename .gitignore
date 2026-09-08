@@ -31,3 +31,8 @@
 *.out
 *.app
 .DS_Store
+
+# Generated release bundles / isolated updater environments
+dist/
+__pycache__/
+.venv/
