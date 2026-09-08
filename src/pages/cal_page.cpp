@@ -2,6 +2,7 @@
 
 #include "app_hooks.h"
 #include "imu_math.h"
+#include "cal_storage.h"
 #include <Arduino.h>
 #include "pin_config.h"
 #include <Preferences.h>
@@ -25,7 +26,6 @@ static lv_obj_t *s_edge_right = nullptr;
 
 // ---- Accel calibration (6-face: bias + diagonal scale + mount rotation) ----
 static constexpr char kAccCalPrefsNs[] = "imu_acc6";
-static constexpr uint8_t kAccCalPrefsVer = 2;
 static float s_accBias[3] = {0.0f, 0.0f, 0.0f};
 static float s_accScale[3] = {1.0f, 1.0f, 1.0f};
 // Row-major R: v_device = R * v_rect; v_rect_i = scale_i * (raw_i - bias_i)
@@ -41,60 +41,29 @@ static inline void apply_accel_cal_impl(float &ax, float &ay, float &az)
   imu_math::mat3_vec3_rowmajor(s_accR, vx, vy, vz, &ax, &ay, &az);
 }
 
-static void save_accel_cal_prefs()
+static bool save_accel_cal_prefs(const float bias[3], const float scale[3], const float rotation[9])
 {
-  Preferences p;
-  if (!p.begin(kAccCalPrefsNs, false)) {
-    return;
-  }
-  p.putBool("ok", true);
-  p.putFloat("bx", s_accBias[0]);
-  p.putFloat("by", s_accBias[1]);
-  p.putFloat("bz", s_accBias[2]);
-  p.putFloat("sx", s_accScale[0]);
-  p.putFloat("sy", s_accScale[1]);
-  p.putFloat("sz", s_accScale[2]);
-  p.putUChar("ver", kAccCalPrefsVer);
-  for (int i = 0; i < 9; i++) {
-    char key[] = "r0";
-    key[1] = (char)('0' + i);
-    p.putFloat(key, s_accR[i]);
-  }
-  // Compatibility with the diagnostic firmware's atomic calibration record.
   float blob[15];
-  memcpy(blob,s_accBias,3*sizeof(float));
-  memcpy(blob+3,s_accScale,3*sizeof(float));
-  memcpy(blob+6,s_accR,9*sizeof(float));
-  p.putBytes("data_v3",blob,sizeof(blob));
-  p.end();
+  memcpy(blob, bias, 3 * sizeof(float));
+  memcpy(blob + 3, scale, 3 * sizeof(float));
+  memcpy(blob + 6, rotation, 9 * sizeof(float));
+  Preferences p;
+  return cal_storage::save_verified(p, kAccCalPrefsNs, blob);
 }
 
 static bool compute_accel_cal_from_6face(const float s[6][3])
 {
-  const float dx = s[2][0] - s[3][0];
-  const float dy = s[4][1] - s[5][1];
-  const float dz = s[0][2] - s[1][2];
-  if (fabsf(dx) < 0.12f || fabsf(dy) < 0.12f || fabsf(dz) < 0.12f) {
+  float bias[3], scale[3], Rmount[9];
+  if (!imu_math::acc_bias_scale_from_6face(s, bias, scale) ||
+      !imu_math::acc_mount_matrix_from_6face(s, bias, scale, Rmount)) {
     return false;
   }
-  s_accBias[0] = (s[2][0] + s[3][0]) * 0.5f;
-  s_accBias[1] = (s[4][1] + s[5][1]) * 0.5f;
-  s_accBias[2] = (s[0][2] + s[1][2]) * 0.5f;
-  s_accScale[0] = 2.0f / dx;
-  s_accScale[1] = 2.0f / dy;
-  s_accScale[2] = 2.0f / dz;
-  if (!isfinite(s_accScale[0]) || !isfinite(s_accScale[1]) || !isfinite(s_accScale[2])) {
-    return false;
-  }
-  float Rmount[9];
-  if (!imu_math::acc_mount_matrix_from_6face(s, s_accBias, s_accScale, Rmount)) {
-    return false;
-  }
-  for (int i = 0; i < 9; i++) {
-    s_accR[i] = Rmount[i];
-  }
+  // Keep the active calibration until the atomic record survives a fresh read.
+  if (!save_accel_cal_prefs(bias, scale, Rmount)) return false;
+  memcpy(s_accBias, bias, sizeof(bias));
+  memcpy(s_accScale, scale, sizeof(scale));
+  memcpy(s_accR, Rmount, sizeof(Rmount));
   s_accCalValid = true;
-  save_accel_cal_prefs();
   return true;
 }
 
@@ -111,22 +80,26 @@ static const float kCalExpected[kCalSteps][3] = {
 static float s_calSamples[kCalSteps][3];
 static uint8_t s_calStep = 0;
 static uint32_t s_calStillStartMs = 0;
+static uint32_t s_calMeasureStartMs = 0;
 static float s_calSumAx = 0.0f, s_calSumAy = 0.0f, s_calSumAz = 0.0f;
 static uint32_t s_calSumCount = 0;
-static uint32_t s_calStableAllCount = 0;
 static float s_calLastRaw[3] = {0.0f, 0.0f, 0.0f};
 static bool s_calPrevValid = false;
 static uint8_t s_calBadStreak = 0;
-static volatile bool s_calAwaitingTapToStart = true;
+// Wizard state belongs exclusively to the IMU task. UI only posts Start.
+static bool s_calAwaitingTapToStart = true;
+static portMUX_TYPE s_calCommandMux = portMUX_INITIALIZER_UNLOCKED;
+static bool s_calStartRequested = false;
 
 static constexpr float kCalMagMinG = 0.86f;
 static constexpr float kCalMagMaxG = 1.14f;
 static constexpr float kCalDotMin = 0.90f;
+// Coarse face identification only (up to 60 degrees); no exact down vector.
+static constexpr float kCalDownDotMin = 0.50f;
 static constexpr float kCalJitterMaxG = 0.14f;
-static constexpr uint32_t kCalHoldMs = 650;
+static constexpr uint32_t kCalStillConfirmMs = 2000;
+static constexpr uint32_t kCalMeasureMs = 3000;
 static constexpr uint32_t kCalMinStableSamples = 20;
-// Discard this many stable samples at the start of each hold (settling after placement).
-static constexpr uint32_t kCalStableDiscardFirst = kCalMinStableSamples;
 static constexpr uint8_t kCalBadStreakToReset = 8;
 static CalUiData s_calUi;
 static portMUX_TYPE s_calUiMux = portMUX_INITIALIZER_UNLOCKED;
@@ -218,8 +191,8 @@ static void set_label(lv_obj_t *label, char *cache, size_t n, const char *txt)
 static const char *instruction_for_step(uint8_t step)
 {
   switch (step) {
-    case 0: return "Lay flat on a table,\nLCD facing up";
-    case 1: return "Lay flat on a table,\nLCD facing down";
+    case 0: return "LCD facing up\nLevel reference";
+    case 1: return "LCD facing down\nTilt OK; hold still";
     case 2: return "Put TOP side down\n(highlighted edge toward table)";
     case 3: return "Put BOTTOM side down\n(highlighted edge toward table)";
     case 4: return "Put LEFT side down\n(highlighted edge toward table)";
@@ -292,7 +265,7 @@ static void wizard_imu_process_sample(float ax, float ay, float az)
     const float nz = az * inv;
     dot = nx * e[0] + ny * e[1] + nz * e[2];
     magOk = (nm > kCalMagMinG && nm < kCalMagMaxG);
-    orientOk = (dot > kCalDotMin);
+    orientOk = (dot > (s_calStep == 1 ? kCalDownDotMin : kCalDotMin));
   }
 
   if (s_calPrevValid) {
@@ -317,32 +290,43 @@ static void wizard_imu_process_sample(float ax, float ay, float az)
   s_calUi.total = kCalSteps;
   s_calUi.align_dot = dot;
   s_calUi.stable = stable;
+  s_calUi.measuring = s_calMeasureStartMs != 0;
   portEXIT_CRITICAL(&s_calUiMux);
 
   if (stable) {
     s_calBadStreak = 0;
     if (s_calStillStartMs == 0) {
       s_calStillStartMs = now;
-      s_calStableAllCount = 0;
     }
-    s_calStableAllCount++;
-    if (s_calStableAllCount > kCalStableDiscardFirst) {
+
+    const uint32_t held = now - s_calStillStartMs;
+    if (s_calMeasureStartMs == 0 && held >= kCalStillConfirmMs) {
+      s_calMeasureStartMs = now;
+      s_calSumAx = s_calSumAy = s_calSumAz = 0.0f;
+      s_calSumCount = 0;
+      portENTER_CRITICAL(&s_calUiMux);
+      s_calUi.measuring = true;
+      portEXIT_CRITICAL(&s_calUiMux);
+    }
+
+    if (s_calMeasureStartMs != 0) {
       s_calSumAx += ax;
       s_calSumAy += ay;
       s_calSumAz += az;
       s_calSumCount++;
     }
 
-    const uint32_t held = now - s_calStillStartMs;
-    if (held >= kCalHoldMs && s_calSumCount >= kCalMinStableSamples) {
+    if (s_calMeasureStartMs != 0 &&
+        now - s_calMeasureStartMs >= kCalMeasureMs &&
+        s_calSumCount >= kCalMinStableSamples) {
       s_calSamples[s_calStep][0] = s_calSumAx / (float)s_calSumCount;
       s_calSamples[s_calStep][1] = s_calSumAy / (float)s_calSumCount;
       s_calSamples[s_calStep][2] = s_calSumAz / (float)s_calSumCount;
       s_calStep++;
       s_calStillStartMs = 0;
+      s_calMeasureStartMs = 0;
       s_calSumAx = s_calSumAy = s_calSumAz = 0.0f;
       s_calSumCount = 0;
-      s_calStableAllCount = 0;
       s_calPrevValid = false;
 
       if (s_calStep < kCalSteps) {
@@ -356,18 +340,24 @@ static void wizard_imu_process_sample(float ax, float ay, float az)
         s_calUi.save_failed = !ok;
         s_calUi.step = kCalSteps;
         s_calUi.stable = false;
+        s_calUi.measuring = false;
         portEXIT_CRITICAL(&s_calUiMux);
         cal_request_beep(ok ? 1000 : 220, ok ? 140 : 300);
       }
     }
   } else {
     s_calBadStreak++;
-    if (s_calBadStreak >= kCalBadStreakToReset) {
+    // Once averaging has started, any rejected sample invalidates this face.
+    // Before averaging, retain the short debounce used to ignore isolated sensor glitches.
+    if (s_calMeasureStartMs != 0 || s_calBadStreak >= kCalBadStreakToReset) {
       s_calStillStartMs = 0;
+      s_calMeasureStartMs = 0;
       s_calSumAx = s_calSumAy = s_calSumAz = 0.0f;
       s_calSumCount = 0;
-      s_calStableAllCount = 0;
       s_calBadStreak = 0;
+      portENTER_CRITICAL(&s_calUiMux);
+      s_calUi.measuring = false;
+      portEXIT_CRITICAL(&s_calUiMux);
     }
   }
 }
@@ -437,7 +427,7 @@ void cal_update(lv_obj_t *primary,
     snprintf(l3, sizeof(l3), "Tap anywhere.");
   } else if (cal.save_failed) {
     snprintf(l1, sizeof(l1), "Failed");
-    snprintf(l2, sizeof(l2), "Bad samples.\nMODE to exit, re-enter CAL.");
+    snprintf(l2, sizeof(l2), "CAL failed.\nMODE to exit and retry.");
     snprintf(l3, sizeof(l3), "");
   } else if (cal.done_saved) {
     snprintf(l1, sizeof(l1), "Done");
@@ -450,10 +440,13 @@ void cal_update(lv_obj_t *primary,
   } else {
     snprintf(l1, sizeof(l1), "Step %u / %u", (unsigned)(cal.step + 1), (unsigned)cal.total);
     snprintf(l2, sizeof(l2), "%s", instruction_for_step(cal.step));
-    if (cal.stable) {
-      snprintf(l3, sizeof(l3), "Hold still... OK (%.2f)", cal.align_dot);
+    if (cal.stable && cal.measuring) {
+      snprintf(l3, sizeof(l3), "Measuring 3 sec... (%.2f)", cal.align_dot);
+    } else if (cal.stable) {
+      snprintf(l3, sizeof(l3), "Hold still 2 sec... (%.2f)", cal.align_dot);
     } else {
-      snprintf(l3, sizeof(l3), "Orient & hold still\n(dot %.2f, need >0.90)", cal.align_dot);
+      snprintf(l3, sizeof(l3), "Orient & hold still\n(dot %.2f, need >%.2f)", cal.align_dot,
+               cal.step == 1 ? kCalDownDotMin : kCalDotMin);
     }
   }
 
@@ -570,21 +563,48 @@ bool cal_accel_cal_valid()
   return s_accCalValid;
 }
 
-void cal_wizard_reset()
+static void cal_wizard_reset()
 {
   cal_cancel_delayed_beep();
-  cal_invalidate_label_caches();
   s_calAwaitingTapToStart = true;
   s_calStep = 0;
   s_calStillStartMs = 0;
+  s_calMeasureStartMs = 0;
   s_calSumAx = s_calSumAy = s_calSumAz = 0.0f;
   s_calSumCount = 0;
-  s_calStableAllCount = 0;
   s_calPrevValid = false;
   s_calBadStreak = 0;
   portENTER_CRITICAL(&s_calUiMux);
   s_calUi = CalUiData{};
+  s_calUi.awaiting_tap = true;
   portEXIT_CRITICAL(&s_calUiMux);
+}
+
+// Called on every IMU loop, even when no sensor sample is available.
+void cal_wizard_imu_sync(bool active)
+{
+  static bool was_active = false;
+  if (active && !was_active) cal_wizard_reset();
+  bool start = false;
+  portENTER_CRITICAL(&s_calCommandMux);
+  start = s_calStartRequested;
+  s_calStartRequested = false;
+  portEXIT_CRITICAL(&s_calCommandMux);
+  if (active && start && s_calAwaitingTapToStart) {
+    s_calAwaitingTapToStart = false;
+    portENTER_CRITICAL(&s_calUiMux);
+    s_calUi.awaiting_tap = false;
+    portEXIT_CRITICAL(&s_calUiMux);
+    cal_request_beep(523, 50);
+  }
+  if (!active && was_active) {
+    cal_cancel_delayed_beep();
+    portENTER_CRITICAL(&s_calToneMux);
+    s_calPendingBeepHz = 0;
+    s_calPendingBeepMs = 0;
+    portEXIT_CRITICAL(&s_calToneMux);
+  }
+  was_active = active;
 }
 
 void cal_wizard_imu_sample(float ax, float ay, float az)
@@ -633,7 +653,6 @@ CalUiData cal_ui_for_refresh()
   portENTER_CRITICAL(&s_calUiMux);
   cu = s_calUi;
   portEXIT_CRITICAL(&s_calUiMux);
-  cu.awaiting_tap = s_calAwaitingTapToStart && !cu.done_saved && !cu.save_failed;
   return cu;
 }
 
@@ -642,15 +661,16 @@ void cal_intro_tap_event(lv_event_t *e)
   if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
     return;
   }
-  if (!s_calAwaitingTapToStart) {
+  if (!cal_ui_for_refresh().awaiting_tap) {
     return;
   }
   if (app_mode_snapshot() != AppMode::Calibrate) {
     return;
   }
-  s_calAwaitingTapToStart = false;
+  portENTER_CRITICAL(&s_calCommandMux);
+  s_calStartRequested = true;
+  portEXIT_CRITICAL(&s_calCommandMux);
   app_mark_user_activity();
-  app_start_tone(523, 50);
   lv_obj_t *layer = (lv_obj_t *)lv_event_get_user_data(e);
   if (layer != nullptr) {
     lv_obj_add_flag(layer, LV_OBJ_FLAG_HIDDEN);

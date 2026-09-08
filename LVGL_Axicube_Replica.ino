@@ -579,6 +579,10 @@ static void imu_task(void * /*param*/)
       vTaskDelay(pdMS_TO_TICKS(20));
     }
 
+    const AppMode modeSnap = app_mode_snapshot();
+    const bool in_calibrate = (modeSnap == AppMode::Calibrate);
+    ui_pages::cal_wizard_imu_sync(in_calibrate);
+
     if (!qmi.getDataReady()) {
       continue;
     }
@@ -587,9 +591,6 @@ static void imu_task(void * /*param*/)
     if (!qmi.getAccelerometer(ax, ay, az)) {
       continue;
     }
-
-    const AppMode modeSnap = app_mode_snapshot();
-    const bool in_calibrate = (modeSnap == AppMode::Calibrate);
 
     if (in_calibrate) {
       portENTER_CRITICAL(&g_imuMux);
@@ -832,7 +833,7 @@ static void ui_refresh()
 
   if (ui_last_mode != mode) {
     if (mode == AppMode::Calibrate && prev_mode != AppMode::Calibrate) {
-      ui_pages::cal_wizard_reset();
+      ui_pages::cal_invalidate_label_caches();
     }
     ui_last_mode = mode;
     ui_set_mode_label(mode);

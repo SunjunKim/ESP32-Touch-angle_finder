@@ -45,7 +45,8 @@ bool imu_calibrated_reading(float raw_ax,
                             ImuCalibratedSample *out,
                             bool apply_saved_calibration = true);
 
-void cal_wizard_reset();
+// IMU task owns entry/reset/start processing; UI never changes wizard state.
+void cal_wizard_imu_sync(bool active);
 void cal_wizard_imu_sample(float ax, float ay, float az);
 void cal_flush_pending_beep();
 void cal_poll_delayed_beep();

@@ -48,18 +48,67 @@ static inline void accel_vector_to_tilt_pitch_roll(float ax,
   }
 }
 
-// 6-face accel samples s[0..5] (raw), same order as calibration wizard; bias + diagonal
-// scale from the usual opposing-pair fit. Writes row-major R with v_device = R * v_rect
-// where v_rect = (sx*(ax-bx), sy*(ay-by), sz*(az-bz)).
+// Fit an axis-aligned ellipsoid from six stationary 1g samples. No opposing
+// direction assumption: in particular, the LCD-down support may be tilted.
+// sum(a[k]*raw[k]^2 + c[k]*raw[k]) = 1, then complete the square.
+static inline bool acc_bias_scale_from_6face(const float samples[6][3],
+                                             float bias[3], float scale[3])
+{
+  double m[6][7] = {};
+  for (int i = 0; i < 6; ++i) {
+    for (int k = 0; k < 3; ++k) {
+      const double v = samples[i][k];
+      if (!isfinite(v)) return false;
+      m[i][k] = v * v;
+      m[i][k + 3] = v;
+    }
+    m[i][6] = 1.0;
+  }
+  for (int col = 0; col < 6; ++col) {
+    int pivot = col;
+    for (int row = col + 1; row < 6; ++row)
+      if (fabs(m[row][col]) > fabs(m[pivot][col])) pivot = row;
+    if (fabs(m[pivot][col]) < 1e-6) return false;
+    for (int k = col; k < 7; ++k) {
+      const double tmp = m[col][k];
+      m[col][k] = m[pivot][k];
+      m[pivot][k] = tmp;
+    }
+    const double divisor = m[col][col];
+    for (int k = col; k < 7; ++k) m[col][k] /= divisor;
+    for (int row = 0; row < 6; ++row) {
+      if (row == col) continue;
+      const double factor = m[row][col];
+      for (int k = col; k < 7; ++k) m[row][k] -= factor * m[col][k];
+    }
+  }
+  double radius2 = 1.0;
+  float b[3], gain[3];
+  for (int k = 0; k < 3; ++k) {
+    const double a = m[k][6], c = m[k + 3][6];
+    if (!isfinite(a) || !isfinite(c) || a <= 0.0) return false;
+    b[k] = -c / (2.0 * a);
+    radius2 += c * c / (4.0 * a);
+  }
+  for (int k = 0; k < 3; ++k) {
+    gain[k] = sqrt(m[k][6] / radius2);
+    if (!isfinite(b[k]) || fabsf(b[k]) > 0.5f ||
+        !isfinite(gain[k]) || gain[k] <= 0.5f || gain[k] >= 2.0f) return false;
+  }
+  for (int k = 0; k < 3; ++k) { bias[k] = b[k]; scale[k] = gain[k]; }
+  return true;
+}
+
+// LCD-up alone defines level; the opposing side pair defines in-plane heading.
+// v_device = R * (scale * (raw - bias)). LCD-down never defines mount direction.
 static inline bool acc_mount_matrix_from_6face(const float s[6][3],
                                                const float bias[3],
                                                const float scale[3],
                                                float R_out[9])
 {
-  (void)bias;
   float dz[3], dx[3];
   for (int k = 0; k < 3; k++) {
-    dz[k] = scale[k] * (s[0][k] - s[1][k]);
+    dz[k] = scale[k] * (s[0][k] - bias[k]);
     dx[k] = scale[k] * (s[3][k] - s[2][k]);
   }
 
