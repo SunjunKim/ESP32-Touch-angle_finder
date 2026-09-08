@@ -85,6 +85,16 @@ void abs_update(lv_obj_t *primary,
 {
   if (!primary || !secondary) return;
 
+  if (incl_bubble) {
+    if (imu.sample_valid) lv_obj_clear_flag(incl_bubble, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(incl_bubble, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (!imu.sample_valid) {
+    set_label_if_changed(primary, s_last_line1, sizeof(s_last_line1), "Net Tilt: --");
+    set_label_if_changed(secondary, s_last_line2, sizeof(s_last_line2), "Pitch: --\nRoll: --");
+    return;
+  }
+
   char line1[64];
   char line2[64];
   snprintf(line1, sizeof(line1), "Net Tilt: %.2f°", imu.tilt_deg);

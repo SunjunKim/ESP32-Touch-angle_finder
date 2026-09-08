@@ -64,5 +64,17 @@ int main() {
   assert(std::fabs(ui_pages::s_accBias[0]) < 1e-6f);
   assert(ui_pages::cal_load_accel_prefs());
 
-  puts("PASS CAL IMU-owned reset/start/cancel / save failure and reload");
+  lv_obj_t primary, secondary, container, bubble;
+  ImuUiData imu; imu.sample_valid = true; imu.tilt_deg = 12; imu.pitch_deg = 7;
+  ui_pages::abs_update(&primary, &secondary, &container, &bubble, imu);
+  assert(primary.text == "Net Tilt: 12.00°" && !(bubble.flags & LV_OBJ_FLAG_HIDDEN));
+  const int old_y = bubble.y;
+  imu.sample_valid = false; imu.pitch_deg = NAN;
+  ui_pages::abs_update(&primary, &secondary, &container, &bubble, imu);
+  assert(primary.text == "Net Tilt: --" && secondary.text == "Pitch: --\nRoll: --");
+  assert((bubble.flags & LV_OBJ_FLAG_HIDDEN) && bubble.y == old_y);
+  imu.sample_valid = true; imu.pitch_deg = 7;
+  ui_pages::abs_update(&primary, &secondary, &container, &bubble, imu);
+  assert(primary.text == "Net Tilt: 12.00°" && !(bubble.flags & LV_OBJ_FLAG_HIDDEN));
+  puts("PASS CAL IMU-owned reset/start/cancel / save failure and reload / ABS lost-data and recovery");
 }
