@@ -31,6 +31,8 @@
 #include "src/pages/app_hooks.h"
 #include "src/pages/imu_math.h"
 #include "src/pages/imu_state.h"
+#include "src/battery_soc.h"
+#include "src/battery_plug.h"
 
 HWCDC USBSerial;
 
@@ -684,6 +686,7 @@ static lv_obj_t *ui_batt_outline = nullptr;
 static lv_obj_t *ui_batt_fill = nullptr;
 static lv_obj_t *ui_batt_cap = nullptr;
 static lv_obj_t *ui_batt_text = nullptr;
+static lv_obj_t *ui_batt_plug = nullptr;
 
 static lv_obj_t *ui_incl_container = nullptr;
 static lv_obj_t *ui_incl_bubble = nullptr;
@@ -718,27 +721,12 @@ static void ui_update_background(bool relRefValid)
   lv_obj_set_style_bg_color(lv_scr_act(), bg, 0);
 }
 
-static uint8_t voltage_to_percent(float v)
-{
-  // Single-cell Li-Po approximation (under light load).
-  // 4.10V = 100%, 3.50V = 0% with a non-linear discharge curve.
-  if (!isfinite(v)) return 0;
-  if (v >= 4.10f) return 100;
-  if (v <= 3.50f) return 0;
-
-  // Piecewise mapping to reflect Li-Po's non-linear plateau behavior.
-  if (v >= 4.00f) return (uint8_t)(85 + (v - 4.00f) * (15.0f / 0.10f));  // 4.00-4.10 => 85-100
-  if (v >= 3.90f) return (uint8_t)(65 + (v - 3.90f) * (20.0f / 0.10f));  // 3.90-4.00 => 65-85
-  if (v >= 3.80f) return (uint8_t)(40 + (v - 3.80f) * (25.0f / 0.10f));  // 3.80-3.90 => 40-65
-  if (v >= 3.70f) return (uint8_t)(20 + (v - 3.70f) * (20.0f / 0.10f));  // 3.70-3.80 => 20-40
-  if (v >= 3.60f) return (uint8_t)(8 + (v - 3.60f) * (12.0f / 0.10f));   // 3.60-3.70 => 8-20
-  return (uint8_t)(0 + (v - 3.50f) * (8.0f / 0.10f));                     // 3.50-3.60 => 0-8
-}
-
 static void battery_poll_and_update()
 {
+  static battery_plug::Detector plugDetector;
+  static battery_soc::Estimator socEstimator;
   static uint32_t lastMs = 0;
-  static int8_t lastBattColorState = -1; // -1 unknown, 0 normal, 1 low, 2 full
+  static int8_t lastBattColorState = -1; // Low/full color plus external-power bit.
   const uint32_t now = millis();
   if (now - lastMs < 1000) return;
   lastMs = now;
@@ -746,6 +734,19 @@ static void battery_poll_and_update()
   const int adcValue = analogRead(kVoltageDividerPin);
   const float voltage = (float)adcValue * (kVRef / 4095.0f);
   const float actualVoltage = voltage * ((kR1 + kR2) / kR2);
+
+  // Use pre-EMA voltage so the SOC filter does not hide plug/unplug edges.
+  const auto plugState = plugDetector.update(actualVoltage, now);
+  // USB host SOF traffic works without an open serial monitor. Power-only
+  // chargers still use voltage inference; host presence is not charge status.
+  const bool showChargeIcon = HWCDC::isPlugged() ||
+      plugState == battery_plug::State::Plugged;
+  if (ui_batt_plug) {
+    if (showChargeIcon)
+      lv_obj_clear_flag(ui_batt_plug, LV_OBJ_FLAG_HIDDEN);
+    else
+      lv_obj_add_flag(ui_batt_plug, LV_OBJ_FLAG_HIDDEN);
+  }
 
   // Smooth voltage
   if (!isfinite(g_battVoltage)) {
@@ -755,7 +756,11 @@ static void battery_poll_and_update()
     g_battVoltage = g_battVoltage + alpha * (actualVoltage - g_battVoltage);
   }
 
-  g_battPct = voltage_to_percent(g_battVoltage);
+  const auto socMode = plugState == battery_plug::State::Plugged
+      ? battery_soc::Mode::Charging
+      : plugState == battery_plug::State::Unplugged
+          ? battery_soc::Mode::Discharging : battery_soc::Mode::Unknown;
+  g_battPct = static_cast<uint8_t>(lroundf(socEstimator.update(g_battVoltage, socMode, now)));
   const bool low = (g_battPct < 20);
   const bool full = (g_battPct > 95);
 
@@ -766,21 +771,26 @@ static void battery_poll_and_update()
     const int clamped = (int)imu_math::clampf((float)fillW, 0.0f, (float)(innerW - 2));
     lv_obj_set_width(ui_batt_fill, clamped);
 
-    const int8_t battColorState = low ? 1 : (full ? 2 : 0);
+    const int8_t battColorState = (low ? 1 : (full ? 2 : 0)) + (showChargeIcon ? 4 : 0);
     if (battColorState != lastBattColorState) {
       lastBattColorState = battColorState;
       const lv_color_t c = low
                            ? lv_palette_lighten(LV_PALETTE_RED, 2)
                            : (full ? lv_palette_lighten(LV_PALETTE_GREEN, 2) : lv_color_white());
-      lv_obj_set_style_bg_color(ui_batt_fill, c, 0);
+      // A muted teal fill keeps the white bolt legible at every charge level.
+      lv_obj_set_style_bg_color(ui_batt_fill,
+          showChargeIcon ? lv_color_hex(0x267C69) : c, 0);
+      const lv_color_t edge = showChargeIcon ? lv_color_hex(0x82DCC0) : lv_color_white();
+      lv_obj_set_style_border_color(ui_batt_outline, edge, 0);
+      if (ui_batt_cap) lv_obj_set_style_bg_color(ui_batt_cap, edge, 0);
       if (ui_batt_text) lv_obj_set_style_text_color(ui_batt_text, c, 0);
     }
 
     if (ui_batt_text) {
       char s[24];
-      // snprintf(s, sizeof(s), "%u%%", (unsigned)g_battPct);
-      snprintf(s, sizeof(s), "%d, %.2fV", adcValue, g_battVoltage);
+      snprintf(s, sizeof(s), "%.2fV", g_battVoltage);
       lv_label_set_text(ui_batt_text, s);
+      lv_obj_align_to(ui_batt_text, ui_batt_outline, LV_ALIGN_OUT_LEFT_MID, -6, 0);
     }
   }
 }
@@ -907,6 +917,16 @@ static void ui_build()
   lv_obj_set_style_bg_color(ui_batt_fill, lv_color_white(), 0);
   lv_obj_set_style_radius(ui_batt_fill, 1, 0);
 
+  // Transparent white bolt overlays the battery, without a rectangular badge.
+  ui_batt_plug = lv_label_create(lv_scr_act());
+  lv_label_set_text(ui_batt_plug, LV_SYMBOL_CHARGE);
+  lv_obj_set_style_text_font(ui_batt_plug, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_color(ui_batt_plug, lv_color_white(), 0);
+  lv_obj_set_style_bg_opa(ui_batt_plug, LV_OPA_TRANSP, 0);
+  lv_obj_clear_flag(ui_batt_plug, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_align_to(ui_batt_plug, ui_batt_outline, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_add_flag(ui_batt_plug, LV_OBJ_FLAG_HIDDEN);
+
   ui_batt_cap = lv_obj_create(lv_scr_act());
   lv_obj_remove_style_all(ui_batt_cap);
   lv_obj_set_size(ui_batt_cap, 3, 8);
@@ -917,7 +937,7 @@ static void ui_build()
 
   ui_batt_text = lv_label_create(lv_scr_act());
   lv_obj_set_style_text_font(ui_batt_text, &lv_font_montserrat_12, 0);
-  lv_obj_align_to(ui_batt_text, ui_batt_outline, LV_ALIGN_OUT_LEFT_MID, -35, 0); // place % to the left of battery
+  lv_obj_align_to(ui_batt_text, ui_batt_outline, LV_ALIGN_OUT_LEFT_MID, -6, 0); // place voltage to the left of battery
   lv_label_set_text(ui_batt_text, "--");
 
   // Inclinometer widget
