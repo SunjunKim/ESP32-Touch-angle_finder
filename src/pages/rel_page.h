@@ -14,6 +14,8 @@ bool rel_capture_reference_now();
 // Uses g_imu.ax_g / ay_g / az_g (calibrated device frame) under the same mutex as ref_*.
 void rel_update_angle_sample();
 void rel_on_tap_zero();
+// UI task: cancel countdown when leaving REL or releasing the button.
+void rel_cancel_zero_hold();
 
 void rel_show(lv_obj_t *incl_container,
               lv_obj_t *rel_angle_big,

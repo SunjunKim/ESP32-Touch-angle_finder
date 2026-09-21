@@ -840,6 +840,7 @@ static void ui_refresh()
   ui_update_background(s.ref_valid);
 
   if (ui_last_mode != mode) {
+    if (prev_mode == AppMode::RelAngle) ui_pages::rel_cancel_zero_hold();
     if (mode == AppMode::Calibrate && prev_mode != AppMode::Calibrate) {
       ui_pages::cal_invalidate_label_caches();
     }

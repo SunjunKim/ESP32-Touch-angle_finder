@@ -14,7 +14,7 @@ LV_FONT_DECLARE(lv_font_roboto_mono_48);
 
 namespace ui_pages {
 
-static constexpr uint32_t kRelZeroHoldMs = 3000;
+static constexpr uint32_t kRelZeroHoldMs = 1000;
 static constexpr uint32_t kRelZeroMaxSampleAgeMs = 50;
 
 namespace {
@@ -26,6 +26,8 @@ static char s_last_zero_btn_label[40] = {0};
 static accel_rel::ContactRel s_rel;
 // UI task only: failed captures keep the previous reference and show a retry hint.
 static bool s_zero_retry = false;
+static bool s_zero_hold_active = false;
+static uint32_t s_zero_press_start_ms = 0;
 
 static inline float round_to_step(float v, float step)
 {
@@ -84,7 +86,7 @@ lv_obj_t *rel_create_zero_button(lv_obj_t *parent)
   if(g_imu.ref_valid) {
     lv_label_set_text(btn_label, "Reset zero");
   } else {
-    lv_label_set_text(btn_label, "Hold 3s to set zero");
+    lv_label_set_text(btn_label, "Hold 1s to set zero");
   }
   
   lv_obj_center(btn_label);
@@ -133,29 +135,33 @@ void rel_on_tap_zero()
   else app_play_rel_zero_sound();
 }
 
+void rel_cancel_zero_hold()
+{
+  s_zero_hold_active = false;
+}
+
 static void rel_zero_btn_event_cb(lv_event_t *e)
 {
   const lv_event_code_t code = lv_event_get_code(e);
-  static uint32_t s_press_start_ms = 0;
-  static bool s_fired_this_hold = false;
-
+  if (app_mode_snapshot() != AppMode::RelAngle) {
+    rel_cancel_zero_hold();
+    return;
+  }
   if (code == LV_EVENT_PRESSED) {
-    s_press_start_ms = millis();
-    s_fired_this_hold = false;
+    s_zero_press_start_ms = millis();
+    s_zero_hold_active = true;
     return;
   }
   if (code == LV_EVENT_PRESSING) {
-    if (s_fired_this_hold) {
-      return;
-    }
-    if ((uint32_t)(millis() - s_press_start_ms) >= kRelZeroHoldMs) {
-      s_fired_this_hold = true;
+    if (s_zero_hold_active &&
+        (uint32_t)(millis() - s_zero_press_start_ms) >= kRelZeroHoldMs) {
+      rel_cancel_zero_hold();
       rel_on_tap_zero();
     }
     return;
   }
   if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
-    return;
+    rel_cancel_zero_hold();
   }
 }
 
@@ -178,12 +184,25 @@ void rel_update(lv_obj_t *rel_angle_big,
                 const ImuUiData &imu)
 {
   if (rel_angle_big) {
-    const float rel_rounded = round_to_step(imu.rel_angle_deg, 0.1f);
     char rel_big[64];
-    if(imu.sample_valid)snprintf(rel_big, sizeof(rel_big), "%.1f°", rel_rounded);
-    else snprintf(rel_big,sizeof(rel_big),"--");
+    if (s_zero_hold_active) {
+      const uint32_t elapsed = millis() - s_zero_press_start_ms;
+      const unsigned seconds = elapsed < kRelZeroHoldMs
+          ? (kRelZeroHoldMs - elapsed + 999) / 1000 : 1;
+      snprintf(rel_big, sizeof(rel_big), "Hold %us", seconds);
+    } else if (imu.sample_valid) {
+      const float rel_rounded = round_to_step(imu.rel_angle_deg, 0.1f);
+      snprintf(rel_big, sizeof(rel_big), "%.1f°", rel_rounded);
+    } else {
+      snprintf(rel_big, sizeof(rel_big), "--");
+    }
+    // The number font has no letters; use a readable warning font while held.
+    lv_obj_set_style_text_font(rel_angle_big,
+        s_zero_hold_active ? &lv_font_montserrat_28 : rel_angle_font(), 0);
     set_label_if_changed(rel_angle_big, s_last_rel_big, sizeof(s_last_rel_big), rel_big);
-    lv_obj_set_style_text_color(rel_angle_big,imu.moving?lv_palette_main(LV_PALETTE_RED):lv_color_white(),0);
+    const lv_color_t color = s_zero_hold_active ? lv_palette_main(LV_PALETTE_ORANGE)
+        : imu.moving ? lv_palette_main(LV_PALETTE_RED) : lv_color_white();
+    lv_obj_set_style_text_color(rel_angle_big, color, 0);
   }
 
   if (debug_label) {
@@ -196,8 +215,8 @@ void rel_update(lv_obj_t *rel_angle_big,
 
   if (rel_zero_btn) {
     lv_obj_t *btn_label = lv_obj_get_child(rel_zero_btn, 0);
-    const char *zero_caption = s_zero_retry ? "Keep still\nHold 3s again" :
-        imu.ref_valid ? "Reset zero" : "Hold 3s to set zero";
+    const char *zero_caption = s_zero_retry ? "Keep still\nHold 1s again" :
+        imu.ref_valid ? "Reset zero" : "Hold 1s to set zero";
     set_label_if_changed(btn_label, s_last_zero_btn_label,
                          sizeof(s_last_zero_btn_label), zero_caption);
   }

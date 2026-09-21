@@ -8,7 +8,7 @@ constexpr int LV_ALIGN_CENTER = 0, LV_ALIGN_BOTTOM_MID = 1, LV_ALIGN_TOP_MID = 2
               LV_ALIGN_LEFT_MID = 3, LV_ALIGN_RIGHT_MID = 4, LV_ALIGN_TOP_LEFT = 5;
 constexpr int LV_LABEL_LONG_CLIP = 0, LV_LABEL_LONG_WRAP = 1, LV_EVENT_CLICKED = 1,
               LV_OPA_COVER = 255, LV_OPA_TRANSP = 0, LV_PALETTE_GREEN = 1, LV_PALETTE_RED = 2;
-struct lv_obj_t { std::string text; int flags = 0, width = 100, height = 100, x = 0, y = 0; };
+struct lv_obj_t { std::string text; int flags = 0, width = 100, height = 100, x = 0, y = 0, font = 0, color = 0; };
 struct lv_event_t { int code = LV_EVENT_CLICKED; void *user_data = nullptr; };
 inline lv_obj_t *lv_scr_act() { static lv_obj_t screen; return &screen; }
 inline lv_obj_t *lv_obj_create(lv_obj_t *) { static lv_obj_t objects[16]; static int i = 0; return &objects[i++]; }
@@ -36,6 +36,7 @@ inline void lv_obj_set_style_bg_opa(lv_obj_t *, int, int) {}
 inline void lv_obj_set_style_border_width(lv_obj_t *, int, int) {}
 using lv_font_t = int;
 inline const lv_font_t lv_font_montserrat_20 = 20;
+inline const lv_font_t lv_font_montserrat_28 = 28;
 #define LV_FONT_DECLARE(name) inline const lv_font_t name = 48
 constexpr int LV_EVENT_PRESSED = 2, LV_EVENT_PRESSING = 3, LV_EVENT_RELEASED = 4,
               LV_EVENT_PRESS_LOST = 5, LV_PALETTE_ORANGE = 3;
@@ -44,5 +45,5 @@ inline lv_obj_t *lv_label_create(lv_obj_t *p) { return lv_obj_create(p); }
 inline lv_obj_t *lv_obj_get_child(lv_obj_t *p, int) { return p; }
 inline void lv_obj_center(lv_obj_t *) {}
 inline int lv_color_white() { return 0xffffff; }
-inline void lv_obj_set_style_text_font(lv_obj_t *, const lv_font_t *, int) {}
-inline void lv_obj_set_style_text_color(lv_obj_t *, int, int) {}
+inline void lv_obj_set_style_text_font(lv_obj_t *o, const lv_font_t *font, int) { o->font = *font; }
+inline void lv_obj_set_style_text_color(lv_obj_t *o, int color, int) { o->color = color; }
