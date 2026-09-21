@@ -735,7 +735,7 @@ static void battery_poll_and_update()
   static battery_plug::Detector plugDetector;
   static battery_soc::Estimator socEstimator;
   static uint32_t lastMs = 0;
-  static int8_t lastBattColorState = -1; // Low/full color plus external-power bit.
+  static int8_t lastBattColorState = -1; // 0 normal, 1 low, 2 full, 3 charging, 4 charging >=95%.
   const uint32_t now = millis();
   if (now - lastMs < 1000) return;
   lastMs = now;
@@ -780,19 +780,22 @@ static void battery_poll_and_update()
     const int clamped = (int)imu_math::clampf((float)fillW, 0.0f, (float)(innerW - 2));
     lv_obj_set_width(ui_batt_fill, clamped);
 
-    const int8_t battColorState = (low ? 1 : (full ? 2 : 0)) + (showChargeIcon ? 4 : 0);
+    const bool chargeHigh = (g_battPct >= 95);
+    const int8_t battColorState = showChargeIcon
+        ? (chargeHigh ? 4 : 3) : (low ? 1 : (full ? 2 : 0));
     if (battColorState != lastBattColorState) {
       lastBattColorState = battColorState;
       const lv_color_t c = low
                            ? lv_palette_lighten(LV_PALETTE_RED, 2)
                            : (full ? lv_palette_lighten(LV_PALETTE_GREEN, 2) : lv_color_white());
-      // A muted teal fill keeps the white bolt legible at every charge level.
-      lv_obj_set_style_bg_color(ui_batt_fill,
-          showChargeIcon ? lv_color_hex(0x267C69) : c, 0);
-      const lv_color_t edge = showChargeIcon ? lv_color_hex(0x82DCC0) : lv_color_white();
+      // Muted green/gray keeps the transparent white bolt legible.
+      const lv_color_t chargeFill = lv_color_hex(chargeHigh ? 0x2E7D32 : 0x626870);
+      const lv_color_t chargeEdge = lv_color_hex(chargeHigh ? 0x81C784 : 0xB0B5BC);
+      lv_obj_set_style_bg_color(ui_batt_fill, showChargeIcon ? chargeFill : c, 0);
+      const lv_color_t edge = showChargeIcon ? chargeEdge : lv_color_white();
       lv_obj_set_style_border_color(ui_batt_outline, edge, 0);
       if (ui_batt_cap) lv_obj_set_style_bg_color(ui_batt_cap, edge, 0);
-      if (ui_batt_text) lv_obj_set_style_text_color(ui_batt_text, c, 0);
+      if (ui_batt_text) lv_obj_set_style_text_color(ui_batt_text, showChargeIcon ? chargeEdge : c, 0);
     }
 
     if (ui_batt_text) {
