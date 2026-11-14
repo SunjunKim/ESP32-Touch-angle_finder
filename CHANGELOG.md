@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- License project code and documentation under GPL-3.0-only; preserve third-party notices.
 - Split REL into 1D (existing ABS pitch difference) and 2D (previous REL algorithm).
 - Boot in 2D; cycle 2D → 1D → ABS → CAL.
 - Share the stationary zero reference across both modes; maintain separate output

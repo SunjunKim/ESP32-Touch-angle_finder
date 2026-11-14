@@ -93,5 +93,10 @@ GitHub Actions에서도 같은 테스트를 실행합니다. 호스트 테스트
 `docs/history/`와 `simulation/`에는 현재 펌웨어와 다른 실험 조건이 남아 있습니다.
 현재 사용법은 본 문서와 `docs/USAGE.md`를 기준으로 합니다.
 
-프로젝트 전체의 라이선스는 아직 지정되지 않았습니다. 폰트와 외부 구성요소의 출처는
-[THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES.md)에 기록합니다.
+## 라이선스
+
+별도 고지가 없는 프로젝트 코드와 문서는 **GNU General Public License v3.0 only
+(GPL-3.0-only)**로 배포합니다. 전문은 [LICENSE](LICENSE)를 참고하세요.
+
+Roboto Mono 폰트, 제조사 회로도·데이터시트 및 외부 구성요소에는 각 원저작자의
+라이선스와 고지가 적용됩니다. 출처는 [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES.md)에 기록합니다.
