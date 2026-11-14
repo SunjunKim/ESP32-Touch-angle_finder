@@ -14,6 +14,11 @@ done
 shopt -s nullglob
 ports=(/dev/cu.usbmodem*)
 printf 'USB modem candidates (model NOT verified):\n'
+if [ -z "${ports[0]:-}" ]; then
+  echo "No USB modem found. Connect the device with a data USB cable."
+  [ "$list" -eq 1 ] && exit 0
+  exit 1
+fi
 for candidate in "${ports[@]}"; do printf '  %s\n' "$candidate"; done
 [ "$list" -eq 0 ] || exit 0
 if [ -z "$port" ]; then

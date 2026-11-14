@@ -12,6 +12,18 @@ import package_native as package
 
 
 class NativePackageTests(unittest.TestCase):
+    def test_macos_no_device_is_handled_without_bash_array_error(self):
+        script = (package.ROOT / "tools/native-update-macos.command").read_text()
+        # Simulate an empty /dev match even when the test host has USB devices.
+        script = script.replace("ports=(/dev/cu.usbmodem*)", "ports=()")
+        for args, status in ((["--list"], 0), ([], 1), (["--dry-run"], 1)):
+            result = subprocess.run(["bash", "-s", "--", *args], input=script,
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, status, result.stderr)
+            self.assertIn("No USB modem found", result.stdout)
+            self.assertNotIn("unbound variable", result.stderr)
+            self.assertNotIn("Type UPDATE", result.stdout)
+
     def test_source_archive_is_committed_and_excludes_builds(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

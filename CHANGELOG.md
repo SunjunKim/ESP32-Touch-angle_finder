@@ -5,6 +5,7 @@
 - Publish standalone Windows x64 and macOS arm64/x64 updater packages using the
   product's existing v0.0.2 version; include source snapshots and license notices.
 - Add download links and USB update instructions for existing device owners.
+- Handle missing USB devices cleanly with the macOS system Bash updater.
 - License project code and documentation under GPL-3.0-only; preserve third-party notices.
 - Split REL into 1D (existing ABS pitch difference) and 2D (previous REL algorithm).
 - Boot in 2D; cycle 2D → 1D → ABS → CAL.
