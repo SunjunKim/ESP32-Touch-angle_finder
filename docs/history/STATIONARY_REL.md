@@ -1,6 +1,6 @@
 # 정지 측정 REL — 단일 영점 UX
 
-> Superseded: current accelerometer-only main-based implementation is documented in ACCEL_REL.md. This file is historical.
+> Superseded: current accelerometer-only main-based implementation is documented in ../ACCEL_REL.md. This file is historical.
 
 ## 현재 조작 (2026-09-07 UX 개정)
 

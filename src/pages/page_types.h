@@ -8,6 +8,8 @@ struct ImuUiData {
   float roll_deg = 0.0f;
   float tilt_deg = 0.0f;
   float rel_angle_deg = 0.0f;
+  float rel_pitch_angle_deg = 0.0f;
+  bool pitch_moving = false;
   bool ref_valid = false;
   uint8_t ref_normal_axis = 2;
   bool sample_valid=false,moving=false;

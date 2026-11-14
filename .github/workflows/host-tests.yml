@@ -1,0 +1,28 @@
+name: Host tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: C++ and JavaScript regression tests
+        env:
+          CXX: clang++
+        run: bash tests/run_host_tests.sh
+      - name: Updater and release package tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v

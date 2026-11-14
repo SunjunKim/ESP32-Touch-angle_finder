@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Split REL into 1D (existing ABS pitch difference) and 2D (previous REL algorithm).
+- Boot in 2D; cycle 2D → 1D → ABS → CAL.
+- Share the stationary zero reference across both modes; maintain separate output
+  filters and settling hints without resetting on mode changes.
+- Preserve the 1-second zero hold, six-face calibration and calibration storage.
+- Prepare the repository for GitHub: organize documentation and reference assets
+  under `docs/`, document dependency installation and releases, and add host-test CI.
+- Include board pin definitions locally so source builds no longer require Mylibrary.
+- Add Roboto Mono attribution and license; ignore generated firmware and local files.
+
 ## 0.0.2 — 2026-09-08
 
 - REL: accelerometer-only estimate; contact normal selected at zero and locked.

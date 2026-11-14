@@ -1,7 +1,7 @@
 # REL: Kadet-style relative plane measurement
 
 > Historical test plan for the discarded tracker. The current implementation and
-> operating procedure are documented in `README.md` and `ACCEL_REL.md`. Do not use the old
+> operating procedure are documented in `../../README.md` and `../ACCEL_REL.md`. Do not use the old
 > stone-zero workflow below for the new firmware.
 
 ## Scope

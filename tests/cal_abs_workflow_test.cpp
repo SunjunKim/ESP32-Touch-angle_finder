@@ -4,14 +4,14 @@
 #include "../src/pages/cal_page.cpp"
 #include "../src/pages/abs_page.cpp"
 
-static AppMode mode = AppMode::RelAngle;
+static AppMode mode = AppMode::Rel2D;
 void app_mark_user_activity() {}
 AppMode app_mode_snapshot() { return mode; }
 void app_start_tone(uint16_t, uint32_t) {}
 void app_play_rel_zero_sound() {}
 
 static void enter_cal() {
-  mode = AppMode::RelAngle;
+  mode = AppMode::Rel2D;
   ui_pages::cal_wizard_imu_sync(false);
   mode = AppMode::Calibrate;
   ui_pages::cal_wizard_imu_sync(true);

@@ -5,7 +5,7 @@ test_dir=$(mktemp -d "${TMPDIR:-/tmp}/axicube-tests.XXXXXX")
 # Keep binaries outside the Arduino source tree. The printed directory is safe
 # to remove after inspection; no wildcard cleanup is performed here.
 printf 'Test binaries: %s\n' "$test_dir"
-for name in cal_storage rel_zero battery_plug battery_soc accel_cal contact_rel accel_rel stationary_rel_tracker; do
+for name in cal_storage rel_zero battery_plug battery_soc accel_cal pitch_rel contact_rel accel_rel stationary_rel_tracker; do
   "${CXX:-clang++}" -std=c++17 -Wall -Wextra -Werror \
     -fsanitize=address,undefined "tests/${name}_test.cpp" -o "$test_dir/$name"
   "$test_dir/$name"

@@ -366,8 +366,8 @@ static void lvgl_tick_cb(void * /*arg*/)
 }
 
 // ---- App: modes ----
-static AppMode g_mode = AppMode::RelAngle;
-static constexpr uint8_t kAppModeCount = 3;
+static AppMode g_mode = AppMode::Rel2D;
+static constexpr uint8_t kAppModeCount = 4;
 static portMUX_TYPE g_appModeMux = portMUX_INITIALIZER_UNLOCKED;
 
 static inline AppMode next_mode(AppMode m)
@@ -662,7 +662,7 @@ static void imu_task(void * /*param*/)
     // Use the same motion flag as the red angle indicator to wake the screen
     // and refresh inactivity timers, including small angle changes.
     portENTER_CRITICAL(&g_imuMux);
-    const bool angleMoving = g_imu.moving;
+    const bool angleMoving = modeSnap == AppMode::Rel1D ? g_imu.pitch_moving : g_imu.moving;
     portEXIT_CRITICAL(&g_imuMux);
     if (angleMoving) {
       mark_motion_activity();
@@ -714,7 +714,7 @@ static void ui_update_background(bool relRefValid)
   uint8_t kind = 0;
   if (g_mode == AppMode::Calibrate) {
     kind = 2;
-  } else if ((g_mode == AppMode::RelAngle) && !relRefValid) {
+  } else if (is_rel_mode(g_mode) && !relRefValid) {
     kind = 1;
   }
   if (kind == ui_last_bg_kind) {
@@ -812,7 +812,8 @@ static void ui_set_mode_label(AppMode mode)
   if (!ui_mode) return;
   switch (mode) {
     case AppMode::AbsAngle: lv_label_set_text(ui_mode, "ABS"); break;
-    case AppMode::RelAngle: lv_label_set_text(ui_mode, "REL"); break;
+    case AppMode::Rel1D: lv_label_set_text(ui_mode, "1D"); break;
+    case AppMode::Rel2D: lv_label_set_text(ui_mode, "2D"); break;
     case AppMode::Calibrate: lv_label_set_text(ui_mode, "CAL"); break;
   }
 }
@@ -843,7 +844,7 @@ static void ui_refresh()
   ui_update_background(s.ref_valid);
 
   if (ui_last_mode != mode) {
-    if (prev_mode == AppMode::RelAngle) ui_pages::rel_cancel_zero_hold();
+    if (is_rel_mode(prev_mode)) ui_pages::rel_cancel_zero_hold();
     if (mode == AppMode::Calibrate && prev_mode != AppMode::Calibrate) {
       ui_pages::cal_invalidate_label_caches();
     }
@@ -857,6 +858,8 @@ static void ui_refresh()
   ui_imu.roll_deg = s.roll_deg;
   ui_imu.tilt_deg = s.tilt_deg;
   ui_imu.rel_angle_deg = s.rel_angle_deg;
+  ui_imu.rel_pitch_angle_deg = s.rel_pitch_angle_deg;
+  ui_imu.pitch_moving = s.pitch_moving;
   ui_imu.ref_valid = s.ref_valid;
   ui_imu.ref_normal_axis = s.ref_normal_axis;
   ui_imu.sample_valid=s.sample_valid&&s.sample_ms&&(uint32_t)(millis()-s.sample_ms)<500;
@@ -872,7 +875,8 @@ static void ui_refresh()
       ui_pages::abs_update(ui_primary, ui_secondary, ui_incl_container, ui_incl_bubble, ui_imu);
       if (ui_debug) lv_label_set_text(ui_debug, "");
       break;
-    case AppMode::RelAngle:
+    case AppMode::Rel1D:
+    case AppMode::Rel2D:
       ui_pages::cal_hide_edges();
       if (ui_cal_tap_layer != nullptr) {
         lv_obj_add_flag(ui_cal_tap_layer, LV_OBJ_FLAG_HIDDEN);
@@ -910,7 +914,7 @@ static void ui_build()
   ui_mode = lv_label_create(lv_scr_act());
   lv_obj_set_style_text_font(ui_mode, &lv_font_montserrat_20, 0);
   lv_obj_align(ui_mode, LV_ALIGN_TOP_LEFT, 17, 6);
-  lv_label_set_text(ui_mode, "REL");
+  ui_set_mode_label(app_mode_snapshot());
 
   // Battery widget (top-right)
   ui_batt_outline = lv_obj_create(lv_scr_act());

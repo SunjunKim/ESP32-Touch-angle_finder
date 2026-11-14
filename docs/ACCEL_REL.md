@@ -1,9 +1,30 @@
 # Accelerometer-only REL (main-based)
 
-## Current revision: contact-normal locked at zero
+## Current revision: 1D / 2D modes (2026-10-04)
+
+Boot in **2D**; cycle **2D → 1D → ABS → CAL** with the mode button.
+Both modes use calibrated acceleration and the same stationary zero window.
+A successful 1-second hold stores both references from the same mean vector;
+mode changes retain zero, and calibration invalidates it.
+
+**1D** uses the existing ABS pitch definition:
+`pitch = atan2(ax, hypot(ay, az))`, `REL_1D = abs(pitch - reference_pitch)`.
+The output range is 0–180 degrees. Sensor X orientation must stay consistent;
+contact-normal selection does not remap the pitch axis. Cross-slope is not
+summed into total inclination. This removes the 2D total-inclination branch
+jump near zero pitch, but does not recover general 3D plane angles.
+
+**2D** retains the existing contact-normal estimator unchanged, with acute
+output in 0–90 degrees. Each mode has its own scalar filter (tau 0.15s) and
+settling hint, updated continuously so switching introduces no filter reset.
+Host coverage includes pitch agreement with ABS, roll independence at fixed
+pitch, opposite slopes, cross-slope branch noise, recovery, shared-zero UI,
+and mode-specific values/colors. Hardware verification is still needed.
+
+## 2D: contact-normal locked at zero
 
 The active estimator is `accel_rel::ContactRel`. Hold the existing zero button
-for 3 seconds near horizontal. The largest absolute calibrated acceleration
+for 1 second while stationary. The largest absolute calibrated acceleration
 component selects contact normal X/Y/Z **once**, at capture. Keep the same device
 contact face for all following measurements. Re-zero is the only operation that
 selects another normal. No knife/stone mode or gyro is required.
@@ -25,8 +46,8 @@ unlabelled stone reference. Prior simulation reports describe prior candidates,
 not a measured error guarantee for this revision.
 
 Only the relative scalar output is low-pass filtered (tau 0.15s), avoiding
-vector-averaging artifacts during in-plane rotation. Capture stores the latest
-valid calibrated sample and resets the displayed relative angle to zero.
+vector-averaging artifacts during in-plane rotation. Capture stores the recent stationary-window
+mean of normalized calibrated samples and resets the displayed relative angle to zero.
 Missing/nonfinite samples retain the saved face/zero and recover automatically;
 calibration clears zero. Red/white is a settling hint and does not gate readings.
 Debug UI shows `N:X/Y/Z locked`; serial prefix is `REL_CONTACT`, with `normal=0/1/2`.
@@ -124,6 +145,6 @@ There is no universally minimum-error relative-plane estimator from these unsign
 
 `tests/accel_rel_test.cpp`: 21,960 tilt/yaw combinations, gain-scale invariance, 100-second in-plane yaw sweep, 20° step response, invalid-input recovery. ASan/UBSan passed. Synthetic 20° step error is below 0.4° after 0.6 seconds (sensor LPF delay is not included). These tests validate computation and invariance, not real-world absolute accuracy.
 
-Older `STATIONARY_REL.md` and `IMU_TUNING.md` describe superseded gyro implementations. Do not use their accuracy claims or operating procedure for this build.
+Older `history/STATIONARY_REL.md` and `history/IMU_TUNING.md` describe superseded gyro implementations. Do not use their accuracy claims or operating procedure for this build.
 
 Build and upload succeeded on the existing Waveshare 1.69 target: program 1,281,015 bytes (40%), static RAM 127,888 bytes (39%). Upload hashes verified, no full flash erase. Boot trace `simulation/hardware_logs/stationary-15s-20260907-222337.jsonl` confirms continuous `REL_ACC` output with valid acceleration readings and gyro disabled in the configured application. Physical in-plane rotation and zero-return verification remain user tests; synthetic invariance is not proof of the actual sensor's calibration accuracy.

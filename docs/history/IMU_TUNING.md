@@ -1,6 +1,6 @@
 # QMI8658 stationary REL tuning — 2026-09-07
 
-> Superseded by the accelerometer-only implementation in ACCEL_REL.md. Gyro settings below are historical, not active firmware settings.
+> Superseded by the accelerometer-only implementation in ../ACCEL_REL.md. Gyro settings below are historical, not active firmware settings.
 
 ## Sources and chip identity
 

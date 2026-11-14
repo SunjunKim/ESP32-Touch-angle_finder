@@ -36,3 +36,26 @@
 dist/
 __pycache__/
 .venv/
+
+# Arduino build output
+/build/
+*.bin
+*.elf
+*.map
+*.hex
+*.uf2
+
+# Local editor / OS files
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+*.swp
+*~
+
+# Local configuration and Python caches
+.env
+.env.*
+!.env.example
+*.py[cod]
+.pytest_cache/

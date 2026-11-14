@@ -22,6 +22,8 @@ struct ImuState {
   uint8_t ref_normal_axis = 2;
 
   float rel_angle_deg = 0.0f;
+  float rel_pitch_angle_deg = 0.0f;
+  bool pitch_moving = false;
   float abs_angle_deg = 0.0f;
 
   bool inited = false;

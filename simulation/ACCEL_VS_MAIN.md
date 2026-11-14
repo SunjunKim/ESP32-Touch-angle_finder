@@ -1,6 +1,6 @@
 # Current accelerometer-only REL vs main — 2026-09-07
 
-> Historical snapshot of the unsigned-inclination revision. The later X-signed firmware is described in ACCEL_REL.md. Re-running compare_accel_main.cpp now evaluates that active X-signed Filter and will not reproduce this saved unsigned report.
+> Historical snapshot of the unsigned-inclination revision. The later X-signed firmware is described in [ACCEL_REL.md](../docs/ACCEL_REL.md). Re-running compare_accel_main.cpp now evaluates that active X-signed Filter and will not reproduce this saved unsigned report.
 
 ## Conclusion
 

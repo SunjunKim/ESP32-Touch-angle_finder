@@ -4,7 +4,7 @@
 개발자가 현재 소스를 먼저 컴파일한 뒤 다음 명령으로 OS별 ZIP을 생성한다.
 
 ```sh
-python3 tools/package_native.py --build-dir /private/tmp/axicube-usb-debug --cache /private/tmp/axicube-native-tools
+python3 tools/package_native.py --build-dir build --cache /tmp/axicube-native-tools
 ```
 
 아래는 기존 Arduino CLI 기반 개발자용 업데이트 경로다.
@@ -19,7 +19,7 @@ Waveshare ESP32-S3-Touch-LCD-1.69용이다. 장치 탐색은 Arduino CLI,
 - Arduino CLI 또는 Arduino IDE 2. PATH와 일반적인 IDE 설치 위치를 탐색한다.
   찾지 못하면 `--cli "실행파일 경로"`를 지정한다.
 - 검증 환경은 Arduino CLI 1.5.1 / ESP32 core 3.3.11이다.
-- 소스 빌드에는 상위 [README](../README.md)의 모든 라이브러리가 필요하다.
+- 소스 빌드에는 [빌드 안내](../docs/BUILD.md)의 모든 라이브러리가 필요하다.
   기존 빌드 폴더로 업데이트할 때는 소스 라이브러리가 필요 없지만,
   해당 보드 정의와 업로더가 포함된 ESP32 core는 설치되어 있어야 한다.
 - 충전 전용이 아닌 USB 케이블로 연결하고 IDE 시리얼 모니터를 닫는다.
@@ -53,14 +53,14 @@ Windows (명령 프롬프트 또는 PowerShell):
 --list                         탐색만 수행, 리셋/쓰기 없음
 --dry-run                      대상 및 계획 확인, 빌드/리셋/쓰기 없음
 --port COM8                    특정 포트 선택 (macOS는 /dev/cu.usbmodem…)
---serial DC:B4:D9:23:1A:80       USB 일련번호로 선택
+--serial YOUR_USB_SERIAL       USB 일련번호로 선택
 --yes                          해당 후보가 올바른 모델임을 확인하고 질문 생략
 --input-dir "기존 빌드 폴더"     재컴파일 없이 신뢰하는 빌드 사용
 --cli "Arduino CLI 경로"        CLI 자동 검색 대신 명시
 ```
 
-예: `bash tools/update-macos.command --serial DC:B4:D9:23:1A:80 --yes`.
-일련번호는 이번 실기 장치의 예시다. 다른 기기는 `--list`에서 확인해야 한다.
+예: `bash tools/update-macos.command --serial YOUR_USB_SERIAL --yes`.
+`YOUR_USB_SERIAL`은 자리표시자다. 실제 값은 `--list`에서 확인한다.
 무인 실행에는 `--serial`과 `--yes`를 함께 사용하는 것이 좋다.
 
 `--input-dir`에는 동일 FQBN으로 만든 Arduino CLI 빌드 폴더를 지정한다.

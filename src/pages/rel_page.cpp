@@ -106,6 +106,7 @@ bool rel_capture_reference_now()
   g_imu.ref_normal_axis = s_rel.normal_axis;
   g_imu.abs_angle_deg = s_rel.tilt;
   g_imu.rel_angle_deg = 0;
+  g_imu.rel_pitch_angle_deg = 0;
   g_imu.ref_valid = true;
   portEXIT_CRITICAL(&g_imuMux);
   return true;
@@ -120,10 +121,12 @@ void rel_update_angle_sample()
   if(!g_imu.sample_valid)s_rel.valid=false;
   g_imu.sample_valid=s_rel.update(g_imu.ax_g,g_imu.ay_g,g_imu.az_g,dt);
   g_imu.moving=s_rel.moving;
+  g_imu.pitch_moving=s_rel.pitch_moving;
   g_imu.sample_ms=now;
   if(g_imu.sample_valid){
     g_imu.abs_angle_deg=s_rel.tilt;
     g_imu.rel_angle_deg=s_rel.angle;
+    g_imu.rel_pitch_angle_deg=s_rel.pitch_angle;
   }
   portEXIT_CRITICAL(&g_imuMux);
 }
@@ -143,7 +146,7 @@ void rel_cancel_zero_hold()
 static void rel_zero_btn_event_cb(lv_event_t *e)
 {
   const lv_event_code_t code = lv_event_get_code(e);
-  if (app_mode_snapshot() != AppMode::RelAngle) {
+  if (!is_rel_mode(app_mode_snapshot())) {
     rel_cancel_zero_hold();
     return;
   }
@@ -183,6 +186,7 @@ void rel_update(lv_obj_t *rel_angle_big,
                 lv_obj_t *rel_zero_btn,
                 const ImuUiData &imu)
 {
+  const bool one_dimensional = app_mode_snapshot() == AppMode::Rel1D;
   if (rel_angle_big) {
     char rel_big[64];
     if (s_zero_hold_active) {
@@ -191,7 +195,7 @@ void rel_update(lv_obj_t *rel_angle_big,
           ? (kRelZeroHoldMs - elapsed + 999) / 1000 : 1;
       snprintf(rel_big, sizeof(rel_big), "Hold %us", seconds);
     } else if (imu.sample_valid) {
-      const float rel_rounded = round_to_step(imu.rel_angle_deg, 0.1f);
+      const float rel_rounded = round_to_step(one_dimensional ? imu.rel_pitch_angle_deg : imu.rel_angle_deg, 0.1f);
       snprintf(rel_big, sizeof(rel_big), "%.1f°", rel_rounded);
     } else {
       snprintf(rel_big, sizeof(rel_big), "--");
@@ -201,14 +205,17 @@ void rel_update(lv_obj_t *rel_angle_big,
         s_zero_hold_active ? &lv_font_montserrat_28 : rel_angle_font(), 0);
     set_label_if_changed(rel_angle_big, s_last_rel_big, sizeof(s_last_rel_big), rel_big);
     const lv_color_t color = s_zero_hold_active ? lv_palette_main(LV_PALETTE_ORANGE)
-        : imu.moving ? lv_palette_main(LV_PALETTE_RED) : lv_color_white();
+        : (one_dimensional ? imu.pitch_moving : imu.moving) ? lv_palette_main(LV_PALETTE_RED) : lv_color_white();
     lv_obj_set_style_text_color(rel_angle_big, color, 0);
   }
 
   if (debug_label) {
     char dbg[96];
     const char axis="XYZ"[imu.ref_normal_axis<3?imu.ref_normal_axis:2];
-    if(imu.ref_valid)snprintf(dbg,sizeof(dbg),"Ref: SET / N:%c locked",axis);
+    if(imu.ref_valid) {
+      if(one_dimensional)snprintf(dbg,sizeof(dbg),"Ref: SET / Pitch");
+      else snprintf(dbg,sizeof(dbg),"Ref: SET / N:%c locked",axis);
+    }
     else snprintf(dbg,sizeof(dbg),"Ref: NOT SET");
     set_label_if_changed(debug_label, s_last_dbg, sizeof(s_last_dbg), dbg);
   }

@@ -84,11 +84,14 @@ class ZeroWindow {
 class ContactRel {
  public:
   float angle=0,tilt=0,reference=0;
+  // 1D uses the existing device-X pitch, independently of the 2D contact normal.
+  float pitch=0,pitch_angle=0,pitch_reference=0;
+  bool pitch_moving=false;
   bool valid=false,moving=false,has_reference=false;
   unsigned normal_axis=2;
 
   void clear_reference(){
-    if(has_reference){valid=false;angle=reference=0;zero_.reset();}
+    if(has_reference){valid=false;angle=reference=0;pitch_angle=pitch_reference=0;zero_.reset();}
     has_reference=false;normal_axis=2;
   }
 
@@ -100,9 +103,11 @@ class ContactRel {
       if(std::fabs(average[i])>std::fabs(average[normal_axis]))normal_axis=i;
     for(unsigned i=0;i<3;i++)direction_[i]=i==normal_axis?0:average[i];
     reference=inclination_of(average);
+    pitch_reference=pitch_of(average);
     has_reference=true;
     if (captured) for (unsigned i = 0; i < 3; ++i) captured[i] = average[i];
     tilt=reference;angle=0;
+    pitch=pitch_reference;pitch_angle=0;
     return true;
   }
 
@@ -110,7 +115,7 @@ class ContactRel {
     if (!valid) zero_.reset();
     zero_.update(x, y, z, dt);
     const float n=std::sqrt(x*x+y*y+z*z);
-    if(!std::isfinite(n)||n<.1f){valid=false;moving=false;return false;}
+    if(!std::isfinite(n)||n<.1f){valid=false;moving=pitch_moving=false;return false;}
     sample_[0]=x/n;sample_[1]=y/n;sample_[2]=z/n;
     tilt=inclination_of(sample_);
     float next=tilt;
@@ -123,6 +128,11 @@ class ContactRel {
       // Unoriented contact planes have acute relative angles, in [0,90].
       if(next>90)next=180-next;
     }
+    pitch=pitch_of(sample_);
+    float next_pitch=has_reference?std::fabs(pitch-pitch_reference):std::fabs(pitch);
+    pitch_moving=std::fabs(n-1)>.05f||(valid&&std::fabs(next_pitch-pitch_angle)>.15f);
+    if(!valid||!std::isfinite(dt)||dt<=0||dt>.5f)pitch_angle=next_pitch;
+    else pitch_angle+=(next_pitch-pitch_angle)*(1-std::exp(-dt/.15f));
     moving=std::fabs(n-1)>.05f||(valid&&std::fabs(next-angle)>.15f);
     if(!valid||!std::isfinite(dt)||dt<=0||dt>.5f)angle=next;
     else angle+=(next-angle)*(1-std::exp(-dt/.15f));
@@ -133,6 +143,9 @@ class ContactRel {
  private:
   ZeroWindow zero_;
   float sample_[3]={0,0,1},direction_[3]={0,0,0};
+  static float pitch_of(const float *v){
+    return std::atan2(v[0],std::hypot(v[1],v[2]))*kDeg;
+  }
   float inclination_of(const float *v)const{
     const unsigned a=(normal_axis+1)%3,b=(normal_axis+2)%3;
     return std::atan2(std::hypot(v[a],v[b]),std::fabs(v[normal_axis]))*kDeg;

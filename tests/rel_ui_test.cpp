@@ -5,7 +5,7 @@ ImuState g_imu;
 portMUX_TYPE g_imuMux;
 static int successes = 0, failures = 0;
 void app_mark_user_activity() {}
-static AppMode mode = AppMode::RelAngle;
+static AppMode mode = AppMode::Rel2D;
 AppMode app_mode_snapshot() { return mode; }
 void app_start_tone(uint16_t hz, uint32_t) { assert(hz == 220); ++failures; }
 void app_play_rel_zero_sound() { ++successes; }
@@ -24,6 +24,9 @@ static void refresh(lv_obj_t &angle) {
   imu.ref_valid = g_imu.ref_valid;
   imu.sample_valid = g_imu.sample_valid && uint32_t(test_ms - g_imu.sample_ms) < 500;
   imu.rel_angle_deg = g_imu.rel_angle_deg;
+  imu.rel_pitch_angle_deg = g_imu.rel_pitch_angle_deg;
+  imu.moving = g_imu.moving;
+  imu.pitch_moving = g_imu.pitch_moving;
   ui_pages::rel_update(&angle, nullptr, nullptr, imu);
 }
 static void countdown_tests() {
@@ -67,7 +70,7 @@ static void countdown_tests() {
   refresh(angle); assert(angle.text == "--");
   mode = AppMode::Calibrate;
   event(LV_EVENT_PRESSED); assert(!ui_pages::s_zero_hold_active);
-  mode = AppMode::RelAngle;
+  mode = AppMode::Rel2D;
   const int previous_failures = failures;
   event(LV_EVENT_PRESSED); test_ms += 1000; event(LV_EVENT_PRESSING);
   refresh(angle);
@@ -104,5 +107,30 @@ int main() {
   assert(successes == 2 && failures == 2);
   assert(std::fabs(g_imu.ref_angle - 20) < .001f);
   countdown_tests();
+  // Both modes capture one shared reference and select their own value/settling hint.
+  g_imu = ImuState{};
+  mode = AppMode::Rel1D;
+  for (int i = 0; i < 82; ++i) feed(15);
+  event(LV_EVENT_PRESSED);
+  for (int i = 0; i < 125; ++i) feed(15);
+  event(LV_EVENT_PRESSING);
+  assert(g_imu.ref_valid);
+  event(LV_EVENT_RELEASED);
+  ImuUiData switched;
+  switched.ref_valid = switched.sample_valid = true;
+  switched.rel_pitch_angle_deg = 14.9f;
+  switched.rel_angle_deg = 16.1f;
+  switched.pitch_moving = false;
+  switched.moving = true;
+  lv_obj_t label, debug;
+  ui_pages::rel_update(&label, &debug, nullptr, switched);
+  assert(label.text == "14.9°" && label.color == lv_color_white());
+  assert(debug.text == "Ref: SET / Pitch");
+  mode = AppMode::Rel2D;
+  ui_pages::rel_update(&label, &debug, nullptr, switched);
+  assert(label.text == "16.1°" && label.color == LV_PALETTE_RED);
+  assert(debug.text == "Ref: SET / N:Z locked");
+  assert(g_imu.ref_valid); // Switching does not discard zero.
+  puts("PASS 1D/2D shared zero / 1D hold / selected angle / selected settling color");
   puts("PASS REL averaged reference / capture freshness / success-only sound / retry label / motion preserves zero");
 }

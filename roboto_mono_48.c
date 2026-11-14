@@ -1,4 +1,6 @@
 /*******************************************************************************
+ * Roboto Mono Light subset. Copyright 2015 The Roboto Mono Project Authors.
+ * SIL Open Font License 1.1; see licenses/RobotoMono-OFL.txt.
  * Size: 48 px
  * Bpp: 4
  * Opts: --bpp 4 --size 48 --no-compress --stride 1 --align 1 --font RobotoMono-Light.ttf --symbols 0123456789.-°   --format lvgl -o roboto_mono_48.c
