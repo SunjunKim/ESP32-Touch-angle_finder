@@ -7,11 +7,13 @@ import json
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import tarfile
+import tempfile
 import urllib.request
 import zipfile
 
-from update_firmware import ROOT, SKETCH, validate_build
+from update_firmware import ROOT, SKETCH, FQBN, validate_build
 
 BASE = "https://github.com/espressif/esptool/releases/download/v5.1.0/"
 ASSETS = {
@@ -59,10 +61,21 @@ def archive_member(data, extension, basename):
         return archive.extractfile(matches[0]).read()
 
 
+def project_source():
+    """Archive the exact committed project, excluding ignored builds and caches."""
+    status = subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT)
+    if status.strip():
+        raise ValueError("Commit project changes before packaging a release.")
+    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    source = subprocess.check_output(
+        ["git", "archive", "--format=zip", "--prefix=LVGL_Axicube_Replica/", commit], cwd=ROOT)
+    return commit, source
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build-dir", type=Path, required=True)
-    parser.add_argument("--cache", type=Path, required=True)
+    parser.add_argument("--cache", type=Path, default=Path(tempfile.gettempdir()) / "axicube-native-tools")
     parser.add_argument("--output", type=Path, default=ROOT / "dist")
     args = parser.parse_args()
     build = args.build_dir.resolve()
@@ -76,6 +89,7 @@ def main():
     targets = {platform: args.output.resolve() / ("axicube-" + version + "-" + platform) for platform in ASSETS}
     if any(p.exists() or Path(str(p) + ".zip").exists() for p in targets.values()):
         raise ValueError("Output exists; select a new --output directory.")
+    commit, project_zip = project_source()
     args.cache.mkdir(parents=True, exist_ok=True)
     source = fetch(SOURCE_URL, args.cache / "esptool-5.1.0-source.tar.gz", SOURCE_SHA)
     for platform, (extension, checksum) in ASSETS.items():
@@ -93,6 +107,15 @@ def main():
         for destination, original in IMAGES.items():
             shutil.copyfile(build / original, target / "firmware" / destination)
         (target / "source/esptool-5.1.0.tar.gz").write_bytes(source)
+        (target / "source" / ("axicube-" + version + "-source.zip")).write_bytes(project_zip)
+        for name in ("LICENSE", "THIRD_PARTY_NOTICES.md"):
+            shutil.copyfile(ROOT / name, target / name)
+        shutil.copytree(ROOT / "licenses", target / "licenses")
+        (target / "BUILD_INFO.json").write_text(json.dumps({
+            "version": version, "source_commit": commit, "fqbn": FQBN,
+            "project_source_sha256": digest(project_zip),
+            "firmware_sha256": digest((target / "firmware/app.bin").read_bytes()),
+        }, indent=2) + "\n")
         (target / "VERSION").write_text(version + "\n")
         if platform.startswith("windows"):
             shutil.copyfile(ROOT / "tools/native-update-windows.cmd", target / "update.cmd")

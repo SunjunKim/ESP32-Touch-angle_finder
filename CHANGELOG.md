@@ -1,7 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.0.2 — 2026-11-14 (GitHub release)
 
+- Publish standalone Windows x64 and macOS arm64/x64 updater packages using the
+  product's existing v0.0.2 version; include source snapshots and license notices.
+- Add download links and USB update instructions for existing device owners.
 - License project code and documentation under GPL-3.0-only; preserve third-party notices.
 - Split REL into 1D (existing ABS pitch difference) and 2D (previous REL algorithm).
 - Boot in 2D; cycle 2D → 1D → ABS → CAL.
@@ -13,7 +16,7 @@
 - Include board pin definitions locally so source builds no longer require Mylibrary.
 - Add Roboto Mono attribution and license; ignore generated firmware and local files.
 
-## 0.0.2 — 2026-09-08
+## 0.0.2 — 2026-09-08 (local development build)
 
 - REL: accelerometer-only estimate; contact normal selected at zero and locked.
 - Preserve three-second zero interaction; show moving readings in red and

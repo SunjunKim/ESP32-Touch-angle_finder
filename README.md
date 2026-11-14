@@ -3,9 +3,44 @@
 Waveshare **ESP32-S3-Touch-LCD-1.69**용 터치 각도계 펌웨어입니다.
 QMI8658 가속도계와 LVGL 화면을 사용해 상대각·절대각을 표시합니다.
 
-현재 소스는 **0.0.2 이후 개발 버전**으로, 1D/2D 모드를 포함합니다.
-화면 버전 문자열은 아직 `v0.0.2`이므로 기존 0.0.2 배포 ZIP과 현재 소스를 구분해야 합니다.
+현재 배포 버전은 제품 화면에 표시되는 **v0.0.2**이며, 1D/2D 모드를 포함합니다.
+아래 GitHub Release의 ZIP은 현재 소스로 만든 배포본입니다.
+과거 로컬 시험용 ZIP도 같은 버전 문자열을 사용했으므로 Release에서 다시 다운로드하세요.
 변경 이력은 [CHANGELOG](CHANGELOG.md)를 참고하세요.
+
+## 기존 제품 사용자: USB로 업데이트
+
+**Arduino IDE·Python·라이브러리를 설치할 필요가 없습니다.** ZIP에 펌웨어와
+업데이트 실행 도구가 포함되어 있으며, 다운로드 후에는 인터넷 없이 동작합니다.
+
+1. [v0.0.2 다운로드 페이지](https://github.com/SunjunKim/ESP32-Touch-angle_finder/releases/tag/v0.0.2)의
+   **Assets**에서 PC에 맞는 ZIP을 받습니다. `Source code`는 개발자용입니다.
+
+   | PC | 다운로드 |
+   | --- | --- |
+   | Windows 64비트 (Intel/AMD) | [axicube-0.0.2-windows-amd64.zip](https://github.com/SunjunKim/ESP32-Touch-angle_finder/releases/download/v0.0.2/axicube-0.0.2-windows-amd64.zip) |
+   | macOS Apple Silicon (M 시리즈) | [axicube-0.0.2-macos-arm64.zip](https://github.com/SunjunKim/ESP32-Touch-angle_finder/releases/download/v0.0.2/axicube-0.0.2-macos-arm64.zip) |
+   | macOS Intel | [axicube-0.0.2-macos-amd64.zip](https://github.com/SunjunKim/ESP32-Touch-angle_finder/releases/download/v0.0.2/axicube-0.0.2-macos-amd64.zip) |
+
+2. ZIP을 **폴더째 압축 해제**합니다. 실행 파일만 꺼내거나 ZIP 안에서 실행하지 마세요.
+3. 제품을 **데이터 전송 가능한 USB 케이블**로 연결하고 시리얼 모니터를 닫습니다.
+4. 압축 해제한 폴더에서 실행합니다.
+   - **Windows:** 터미널에서 `.\update.cmd` 실행.
+   - **macOS:** 터미널에서 `bash update.command` 실행.
+5. 표시된 포트가 해당 제품인지 확인하고 `UPDATE`를 입력합니다.
+   완료될 때까지 USB를 유지하면 쓰기·검증 후 재부팅을 요청합니다.
+6. 시작 화면의 `v0.0.2`, 터치와 모드 전환을 확인한 뒤 **영점을 다시 잡습니다**.
+
+기존 Axicube와 같은 파티션 구성이면 저장된 CAL 보정값을 유지하며 전체 플래시를 지우지 않습니다.
+다른 펌웨어나 파티션 구성에서의 보정값 유지는 보장하지 않습니다.
+
+기기가 여러 개면 Windows는 `.\update.cmd -Port COM8`, macOS는
+`bash update.command --port /dev/cu.usbmodem실제포트`로 선택합니다.
+자동 연결에 실패하면 BOOT를 누른 채 RESET을 눌렀다 떼고 BOOT를 놓은 뒤 다시 실행합니다.
+수동 다운로드 모드에서 업데이트했다면 RESET을 직접 눌러야 할 수 있습니다.
+
+OS 보안 경고는 [상세 업데이트 안내](tools/NATIVE_RELEASE.md)를 참고하세요.
+비공개 저장소의 다운로드에는 접근 권한이 있는 GitHub 계정 로그인이 필요합니다.
 
 ## 주요 기능
 

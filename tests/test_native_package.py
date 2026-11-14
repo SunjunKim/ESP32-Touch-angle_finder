@@ -1,15 +1,45 @@
 import io
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
 import unittest
 import zipfile
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import package_native as package
 
 
 class NativePackageTests(unittest.TestCase):
+    def test_source_archive_is_committed_and_excludes_builds(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            def git(*args):
+                return subprocess.check_output(["git", *args], cwd=root, stderr=subprocess.DEVNULL)
+            git("init")
+            (root / ".gitignore").write_text("dist/\n")
+            (root / "firmware.ino").write_text("// committed firmware\n")
+            git("add", ".")
+            git("-c", "user.name=Package Test", "-c", "user.email=test@example.invalid",
+                "-c", "commit.gpgsign=false", "commit", "-m", "fixture")
+            (root / "dist").mkdir()
+            (root / "dist/private-build.bin").write_bytes(b"ignored")
+            with patch.object(package, "ROOT", root):
+                commit, source = package.project_source()
+                self.assertEqual(commit, git("rev-parse", "HEAD").decode().strip())
+                with zipfile.ZipFile(io.BytesIO(source)) as archive:
+                    self.assertEqual(archive.read("LVGL_Axicube_Replica/firmware.ino"),
+                                     b"// committed firmware\n")
+                    self.assertFalse(any("dist/" in name or ".git/" in name for name in archive.namelist()))
+                (root / "firmware.ino").write_text("// uncommitted firmware\n")
+                with self.assertRaisesRegex(ValueError, "Commit project changes"):
+                    package.project_source()
+                git("checkout", "--", "firmware.ino")
+                (root / "untracked.h").write_text("// untracked dependency\n")
+                with self.assertRaisesRegex(ValueError, "Commit project changes"):
+                    package.project_source()
+
     def test_cached_download_hash(self):
         with tempfile.TemporaryDirectory() as temp:
             file = Path(temp) / "asset"

@@ -32,9 +32,15 @@ NVS `0x9000–0xDFFF`를 제외한 네 구간만 쓰며 전체 삭제를 하지 
 자동 진입 실패 시 BOOT를 누른 채 RESET을 눌렀다 떼고 BOOT를 놓은 후 재탐색한다.
 수동 다운로드 모드에서는 업로드 후 RESET을 직접 눌러야 할 수 있다.
 macOS Gatekeeper/Windows SmartScreen 또는 PowerShell 실행 정책이 차단할 수 있다.
+Windows `update.cmd`는 실행한 PowerShell 프로세스에만 `ExecutionPolicy Bypass`를 적용하며,
+사용자·시스템의 실행 정책 설정을 변경하지 않는다. 조직의 관리 정책은 여전히 적용될 수 있다.
 보안을 전역 해제하지 말고 출처를 확인한 뒤 OS의 개별 실행 허용 절차나 관리자 지침을 따른다.
-Windows ARM, Intel macOS, Windows 실기 업로드는 이 작업 환경에서 검증하지 않았다.
+Windows ARM은 지원 대상에 포함하지 않는다. OS별 실기 업로드 검증 범위는 릴리스 노트를 참고한다.
 
 `UPSTREAM.json`에 공식 다운로드 URL과 원본 체크섬을 기록한다.
-`source/`는 esptool 5.1.0의 공식 소스 배포본(GPLv2+)이다.
-이 패키지는 로컬 검증용 산출물이며 공개 배포 전 펌웨어/런타임의 전체 라이선스 요건도 확인해야 한다.
+`BUILD_INFO.json`에는 프로젝트 소스 커밋, 보드 설정과 펌웨어 체크섬을 기록한다.
+`source/axicube-버전-source.zip`은 해당 커밋의 프로젝트 소스이며,
+빌드 의존성과 설치 절차는 그 안의 `docs/BUILD.md`에 있다.
+`source/esptool-5.1.0.tar.gz`는 esptool의 공식 소스 배포본(GPLv2+)이다.
+프로젝트 GPL-3.0-only 전문은 `LICENSE`, 외부 구성요소 고지는 `THIRD_PARTY_NOTICES.md`,
+폰트 라이선스는 `licenses/`에 포함되어 있다. 외부 자료에는 각 원저작자의 조건이 적용된다.
